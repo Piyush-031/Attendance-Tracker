@@ -6,6 +6,40 @@
 <script src="https://cdn.jsdelivr.net/npm/xlsx/dist/xlsx.full.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&display=swap" rel="stylesheet">
+
+<!-- Firebase v9 modular SDK (CDN module). Initializes Firebase and exposes helpers to window.firebaseDB -->
+<script type="module">
+  import { initializeApp } from "https://www.gstatic.com/firebasejs/9.22.2/firebase-app.js";
+  import { getDatabase, ref, set, get, onValue, update, push, child } from "https://www.gstatic.com/firebasejs/9.22.2/firebase-database.js";
+  import { getAuth, signInAnonymously } from "https://www.gstatic.com/firebasejs/9.22.2/firebase-auth.js";
+
+  // <-- YOUR firebaseConfig pasted here (from your message) -->
+  const firebaseConfig = {
+    apiKey: "AIzaSyDjBqHpawIuc4RKQ3S-dnohCfjSwBvdkk4",
+    authDomain: "attendence-tracker-28d8d.firebaseapp.com",
+    databaseURL: "https://attendence-tracker-28d8d-default-rtdb.asia-southeast1.firebasedatabase.app",
+    projectId: "attendence-tracker-28d8d",
+    storageBucket: "attendence-tracker-28d8d.firebasestorage.app",
+    messagingSenderId: "796356629335",
+    appId: "1:796356629335:web:1be1c346036fff063a6412",
+    measurementId: "G-FPRYP4FCXR"
+  };
+
+  const app = initializeApp(firebaseConfig);
+  const db = getDatabase(app);
+  const auth = getAuth(app);
+
+  // Try anonymous sign-in for a simple secure setup (you can remove if you don't want auth)
+  signInAnonymously(auth).then(() => {
+    console.log("Signed in anonymously to Firebase");
+  }).catch(err => {
+    console.warn("Anonymous sign-in failed (you can ignore this if you use open DB rules):", err);
+  });
+
+  // Expose DB helpers to non-module script below
+  window.firebaseDB = { db, ref, set, get, onValue, update, push, child };
+</script>
+
 <style>
 :root {
   --card-bg: rgba(30,30,30,0.6);
@@ -577,39 +611,111 @@ Chart.register(DepthBars);
 })();
 
 /* === APP LOGIC === */
-let employees=[], attendanceData={}, barChart, stackedChart;
+/* Data model stays the same but we will persist to Firebase Realtime DB */
+let employees = [], attendanceData = {}, barChart, stackedChart;
 const colors = {"WFO":"#2ecc71","WFH":"#3498db","Leave":"#e74c3c","Holiday":"#f1c40f"};
 
-if(localStorage.getItem("attendanceData")){
-  attendanceData = JSON.parse(localStorage.getItem("attendanceData"));
-  employees = JSON.parse(localStorage.getItem("employees")) || [];
+/* ---------- Firebase helpers ---------- */
+/* Helper to encode/decode keys so they are safe as Firebase child keys */
+function encodeKey(key){ return encodeURIComponent(key); }
+function decodeKey(enc){ try{ return decodeURIComponent(enc); } catch(e){ return enc; } }
+
+function saveToFirebase(){
+  if(!window.firebaseDB) {
+    console.warn("firebaseDB not available; cannot save.");
+    return;
+  }
+  const { db, ref, set } = window.firebaseDB;
+
+  // encode attendanceData keys before saving
+  const encoded = {};
+  for(const k in attendanceData){
+    encoded[ encodeKey(k) ] = attendanceData[k];
+  }
+
+  set(ref(db, 'attendanceApp'), {
+    attendanceData: encoded,
+    employees: employees
+  }).catch(err => console.error("Firebase write error:", err));
 }
 
+/* Initialize real-time listener (run once) */
+(function initFirebaseListener(){
+  // If firebase not loaded yet, poll for it a bit
+  const waitForFirebase = () => {
+    if(window.firebaseDB && window.firebaseDB.onValue){
+      const { db, ref, onValue } = window.firebaseDB;
+      const rootRef = ref(db, 'attendanceApp');
+
+      onValue(rootRef, snapshot => {
+        const val = snapshot.val();
+        if(!val){
+          attendanceData = {};
+          employees = [];
+        } else {
+          // decode attendance keys
+          attendanceData = {};
+          const raw = val.attendanceData || {};
+          for(const encKey in raw){
+            attendanceData[ decodeKey(encKey) ] = raw[encKey];
+          }
+          employees = val.employees || [];
+        }
+        // update UI
+        refreshEmployeeDatalist();
+        generateTable();
+      }, err => {
+        console.error("Firebase onValue err:", err);
+      });
+    } else {
+      // try again shortly until firebase loads (this script runs after firebase init in head so it should be immediate)
+      setTimeout(waitForFirebase, 200);
+    }
+  };
+  waitForFirebase();
+})();
+
+/* update a single key in firebase for snappy updates */
+function updateData(key, val){
+  // update locally for instant UI
+  attendanceData[key] = val;
+
+  // write single child path with encoded key
+  if(window.firebaseDB){
+    const { db, ref, set } = window.firebaseDB;
+    const safeKey = encodeKey(key);
+    // if val is falsy/empty we remove the node by setting null
+    const valueToSet = (val === "" || val === null || typeof val === 'undefined') ? null : val;
+    set(ref(db, `attendanceApp/attendanceData/${safeKey}`), valueToSet)
+      .catch(err => console.error("Firebase single-key update failed:", err));
+  } else {
+    console.warn("firebaseDB not available; local-only update performed.");
+  }
+  generateTable();
+}
+
+/* ---------- End Firebase helpers ---------- */
+
+/* ===== UI / app functions (mostly unchanged) ===== */
 function addEmployee(){ 
   const name=document.getElementById("employeeName").value.trim(); 
-  if(name&&!employees.includes(name)){ 
+  if(name && !employees.includes(name)){ 
     employees.push(name); 
     document.getElementById("employeeName").value=""; 
-    saveToLocal(); 
+    saveToFirebase(); 
     refreshEmployeeDatalist();
     generateTable(); 
   } 
 }
 function removeEmployee(){ 
-  const name=document.getElementById("employeeName").value.trim(); 
-  employees=employees.filter(e=>e!==name); 
+  const name=document.getElementById("employeeName").value.trim();
+  employees = employees.filter(e=>e!==name); 
   document.getElementById("employeeName").value=""; 
-  saveToLocal(); 
+  saveToFirebase(); 
   refreshEmployeeDatalist();
   generateTable(); 
 }
 
-function saveToLocal(){
-  localStorage.setItem("attendanceData", JSON.stringify(attendanceData));
-  localStorage.setItem("employees", JSON.stringify(employees));
-}
-
-/* ===== Search helpers ===== */
 function refreshEmployeeDatalist(){
   const dl = document.getElementById("employeeSuggestions");
   if(!dl) return;
@@ -685,7 +791,6 @@ function updateSearchSummary(employeeName){
   summaryEl.appendChild(makeBadge("Leave","leave",counts.Leave));
   summaryEl.appendChild(makeBadge("Holiday","holiday",counts.Holiday));
 }
-/* ===== End search helpers ===== */
 
 function generateTable(){
   const month=document.getElementById("monthPicker").value; if(!month) return;
@@ -734,11 +839,6 @@ function generateTable(){
   if(currentSearch) applyEmployeeFilter();
 }
 
-function updateData(key,val){ 
-  attendanceData[key]=val; 
-  saveToLocal(); generateTable(); 
-}
-
 function applyBulkUpdate(){
   const status = document.getElementById("bulkStatus").value;
   const start = parseInt(document.getElementById("bulkStart").value);
@@ -756,7 +856,9 @@ function applyBulkUpdate(){
       }
     }
   });
-  saveToLocal();
+
+  // For bulk updates we write the full object (easier than many single writes)
+  saveToFirebase();
   generateTable();
 }
 
@@ -799,7 +901,8 @@ function loadFromExcel(event){
       const monthInput = document.getElementById("monthPicker");
       if (year && month && monthInput) monthInput.value = `${year}-${String(month).padStart(2,'0')}`;
     }
-    saveToLocal(); 
+    // Persist to firebase (becomes canonical)
+    saveToFirebase(); 
     refreshEmployeeDatalist();
     generateTable();
   };
