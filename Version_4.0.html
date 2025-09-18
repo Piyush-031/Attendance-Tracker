@@ -1134,6 +1134,114 @@ const DepthBars = {
 };
 Chart.register(DepthBars);
 
+/* === Twinkling Stars === */
+(function(){
+  const canvas = document.getElementById('stars-bg');
+  const ctx = canvas.getContext('2d');
+  let stars = [], width, height, devicePxRatio;
+
+  function resize(){
+    width = window.innerWidth;
+    height = window.innerHeight;
+    devicePxRatio = window.devicePixelRatio || 1;
+    canvas.width = Math.floor(width * devicePxRatio);
+    canvas.height = Math.floor(height * devicePxRatio);
+    canvas.style.width = width + 'px';
+    canvas.style.height = height + 'px';
+    ctx.setTransform(devicePxRatio, 0, 0, devicePxRatio, 0, 0);
+    initStars();
+  }
+  function initStars(){
+    stars=[];
+    const count = Math.min(220, Math.max(120, Math.floor(width * height * 0.00012)));
+    for(let i=0;i<count;i++){
+      stars.push({ x:Math.random()*width, y:Math.random()*height, r:Math.random()*1.6+0.4, alpha:Math.random(), dAlpha:(Math.random()*0.02+0.006)*(Math.random()<0.5?-1:1) });
+    }
+  }
+  function animate(){
+    ctx.clearRect(0,0,width,height);
+    for(const s of stars){
+      s.alpha += s.dAlpha;
+      if(s.alpha <= 0){ s.alpha = 0; s.dAlpha *= -1; }
+      else if(s.alpha >= 1){ s.alpha = 1; s.dAlpha *= -1; }
+      ctx.beginPath();
+      ctx.arc(s.x, s.y, s.r, 0, Math.PI*2);
+      ctx.fillStyle = `rgba(255,255,255,${s.alpha})`;
+      ctx.shadowBlur = 8; ctx.shadowColor = "rgba(255,255,255,0.8)";
+      ctx.fill(); ctx.shadowBlur = 0;
+    }
+    requestAnimationFrame(animate);
+  }
+  window.addEventListener('resize', resize, { passive:true });
+  resize(); animate();
+})();
+
+/* === Particle Background === */
+(function(){
+  const canvas = document.getElementById('particles-bg');
+  const ctx = canvas.getContext('2d');
+  let particles = [], width, height, devicePxRatio;
+
+  function resize() {
+    width = window.innerWidth;
+    height = window.innerHeight;
+    devicePxRatio = window.devicePixelRatio || 1;
+    canvas.width = Math.floor(width * devicePxRatio);
+    canvas.height = Math.floor(height * devicePxRatio);
+    canvas.style.width = width + 'px';
+    canvas.style.height = height + 'px';
+    ctx.setTransform(devicePxRatio, 0, 0, devicePxRatio, 0, 0);
+    initParticles();
+  }
+
+  function initParticles() {
+    const density = 0.00012;
+    const targetCount = Math.min(220, Math.max(80, Math.floor(width * height * density)));
+    particles = [];
+    for (let i = 0; i < targetCount; i++) {
+      particles.push({ x:Math.random()*width, y:Math.random()*height, vx:(Math.random()-0.5)*0.6, vy:(Math.random()-0.5)*0.6, r:Math.random()*1.6+0.6, a:Math.random()*0.6+0.3 });
+    }
+  }
+
+  function step() {
+    ctx.clearRect(0, 0, width, height);
+    const maxDist = Math.min(160, Math.max(90, Math.min(width, height) * 0.18));
+
+    for (let i = 0; i < particles.length; i++) {
+      const p = particles[i];
+      p.x += p.vx; p.y += p.vy;
+      if (p.x < -10) p.x = width + 10;
+      if (p.x > width + 10) p.x = -10;
+      if (p.y < -10) p.y = height + 10;
+      if (p.y > height + 10) p.y = -10;
+
+      ctx.beginPath(); ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
+      ctx.fillStyle = 'rgba(255,255,255,' + p.a + ')';
+      ctx.shadowBlur = 12; ctx.shadowColor = "rgba(255,255,255,0.6)";
+      ctx.fill(); ctx.shadowBlur = 0;
+    }
+
+    ctx.lineWidth = 0.7;
+    for (let i = 0; i < particles.length; i++) {
+      for (let j = i + 1; j < particles.length; j++) {
+        const p1 = particles[i], p2 = particles[j];
+        const dx = p1.x - p2.x, dy = p1.y - p2.y;
+        const dist2 = dx*dx + dy*dy;
+        if (dist2 < maxDist*maxDist) {
+          const dist = Math.sqrt(dist2);
+          const alpha = 1 - dist / maxDist;
+          ctx.strokeStyle = 'rgba(255,255,255,' + (alpha * 0.25) + ')';
+          ctx.beginPath(); ctx.moveTo(p1.x, p1.y); ctx.lineTo(p2.x, p2.y); ctx.stroke();
+        }
+      }
+    }
+    requestAnimationFrame(step);
+  }
+  window.addEventListener('resize', resize, { passive: true });
+  resize(); requestAnimationFrame(step);
+})();
+
+/* ===== Charts helpers (continued) ===== */
 function createGradient(ctx, color){
   const gradient = ctx.createLinearGradient(0,0,0,350);
   gradient.addColorStop(0, lightenColor(color,0.3));
@@ -1316,3 +1424,4 @@ window.removeEmployee = ()=> document.getElementById('removeEmployeeBtn').click(
 </script>
 </body>
 </html>
+
