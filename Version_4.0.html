@@ -13,7 +13,7 @@
   import { getDatabase, ref, set, get, onValue, update, push, child } from "https://www.gstatic.com/firebasejs/9.22.2/firebase-database.js";
   import { getAuth, signInAnonymously } from "https://www.gstatic.com/firebasejs/9.22.2/firebase-auth.js";
 
-  // <-- YOUR firebaseConfig pasted here (from your message) -->
+  // <-- YOUR firebaseConfig pasted here -->
   const firebaseConfig = {
     apiKey: "AIzaSyDjBqHpawIuc4RKQ3S-dnohCfjSwBvdkk4",
     authDomain: "attendence-tracker-28d8d.firebaseapp.com",
@@ -130,24 +130,71 @@ header {
   100% { background-position: 300% 50%; }
 }
 
-/* Live IST clock */
-.clock {
+/* Topbar (full-width): clock left, user panel right */
+.topbar {
   position: fixed;
+  left: 0;
+  right: 0;
   top: 12px;
-  right: 18px;
-  z-index: 5;
+  z-index: 60;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 0 18px;            /* horizontal padding for both edges */
+  pointer-events: none;      /* allow children to accept clicks via override below */
+}
+
+/* allow children to accept clicks while topbar container ignores pointer events */
+.topbar > * { pointer-events: auto; }
+
+/* Live IST clock (pinned left) */
+.clock {
   color: #f1f1f1;
   font-weight: 600;
   letter-spacing: .3px;
-  padding: 6px 12px;
+  padding: 8px 12px;
   border-radius: 12px;
-  background: #141414; /* solid */
-  border: 1px solid rgba(255,255,255,0.15);
-  box-shadow: 0 6px 16px rgba(0,0,0,0.35);
-  backdrop-filter: none;
-  text-shadow: 0 0 8px rgba(9,132,227,0.6);
+  background: linear-gradient(90deg, rgba(20,20,20,0.9), rgba(12,12,12,0.95));
+  border: 1px solid rgba(255,255,255,0.08);
+  box-shadow: 0 8px 20px rgba(0,0,0,0.45), 0 0 10px rgba(9,132,227,0.08) inset;
+  text-shadow: 0 0 8px rgba(9,132,227,0.45);
+  font-size: 0.96rem;
+  margin-right: 6px;
 }
 
+/* User panel pinned to right (via spacer in HTML) */
+.user-panel {
+  display:flex;
+  gap:10px;
+  align-items:center;
+  background: linear-gradient(90deg, rgba(10,10,12,0.7), rgba(6,6,8,0.75));
+  padding: 6px;
+  border-radius: 999px;
+  border: 1px solid rgba(255,255,255,0.06);
+  box-shadow: 0 6px 18px rgba(0,0,0,0.45);
+}
+.user-badge {
+  padding: 6px 12px;
+  border-radius: 999px;
+  background: linear-gradient(90deg, rgba(9,132,227,0.12), rgba(0,184,148,0.06));
+  color: #fff;
+  font-weight: 600;
+  font-size: 0.92rem;
+  display:flex; gap:8px; align-items:center;
+}
+.user-actions button {
+  padding:6px 10px;
+  border-radius: 12px;
+  border: none;
+  background: rgba(255,255,255,0.06);
+  color: #fff;
+  cursor:pointer;
+  font-weight:600;
+  transition: transform .12s, box-shadow .12s;
+}
+.user-actions button:hover{ transform: translateY(-2px); box-shadow: 0 6px 14px rgba(0,0,0,0.35); }
+
+/* Rest of original styles (kept) */
 .container {
   display:flex; flex-direction:column; gap:25px; padding:20px; max-width:1200px; margin:auto;
   position: relative;
@@ -356,12 +403,30 @@ input[type="date"]::-webkit-calendar-picker-indicator {
 /* locked main (blurbed while overlay active) */
 .locked { filter: blur(2px) grayscale(.04); pointer-events: none; user-select: none; opacity: .98 }
 
+@media (max-width: 760px){
+  .topbar { padding: 0 10px; }
+  .clock { font-size:0.8rem; padding:6px 8px; }
+  .user-badge { font-size:0.85rem; padding:4px 8px; }
+}
 </style>
 </head>
 <body>
 
-<!-- Live IST clock -->
-<div id="clock" class="clock">--:--:-- -- | -- --- ----</div>
+<!-- Topbar: clock (left) + spacer + user panel (right) -->
+<div class="topbar" aria-hidden="false">
+  <div id="clock" class="clock">--:--:-- -- | -- --- ----</div>
+
+  <div style="flex:1"></div> <!-- spacer pushes user panel to the far right -->
+
+  <div class="user-panel" id="topUserPanel" aria-hidden="false">
+    <div class="user-badge" id="userStatusDisplay">Not logged</div>
+    <div class="user-actions" id="topUserActions">
+      <button id="userLogoutBtn" style="display:none">Logout</button>
+      <button id="adminLoginMainBtn">Admin Login</button>
+      <button id="adminLogoutMainBtn" style="display:none">Admin Logout</button>
+    </div>
+  </div>
+</div>
 
 <!-- Twinkling stars & particle network -->
 <canvas id="stars-bg"></canvas>
@@ -484,20 +549,11 @@ input[type="date"]::-webkit-calendar-picker-indicator {
       </div>
     </div>
 
-    <div style="position:fixed; right:18px; top:70px; z-index:50; display:flex; gap:8px; align-items:center;">
-      <div id="userStatusDisplay" style="color:#fff; font-weight:600"></div>
-      <button id="userLogoutBtn" style="display:none">Logout</button>
-      <button id="adminLoginMainBtn">Admin Login</button>
-      <button id="adminLogoutMainBtn" style="display:none">Admin Logout</button>
-    </div>
-
   </div>
 </div>
 
 <script>
-/* ===========================
-   Utilities / App State
-   =========================== */
+/* ===== app state & helpers ===== */
 const SESSION_USER_KEY = 'attendance_current_user';
 const SESSION_ADMIN_KEY = 'attendance_is_admin';
 
@@ -508,10 +564,12 @@ function encodeKey(key){ return encodeURIComponent(key); }
 function decodeKey(enc){ try{ return decodeURIComponent(enc); } catch(e){ return enc; } }
 function dbReady(){ return !!window.firebaseDB && !!window.firebaseDB.db; }
 
+/* SHA-256 hex */
 async function sha256Hex(str){
   const enc = new TextEncoder().encode(str);
   const hashBuf = await crypto.subtle.digest('SHA-256', enc);
-  return Array.from(new Uint8Array(hashBuf)).map(b => b.toString(16).padStart(2,'0')).join('');
+  const hashArray = Array.from(new Uint8Array(hashBuf));
+  return hashArray.map(b => b.toString(16).padStart(2,'0')).join('');
 }
 
 /* UI refs */
@@ -548,7 +606,7 @@ function hideOverlay(){ overlay.style.display = 'none'; mainPage.classList.remov
 
 /* update session UI */
 function updateSessionUI(){
-  userStatusDisplay.textContent = window.currentUser ? `Logged in: ${window.currentUser}` : '';
+  userStatusDisplay.textContent = window.currentUser ? `Logged in: ${window.currentUser}` : 'Not logged';
   userLogoutBtn.style.display = window.currentUser ? '' : 'none';
   if(window.isAdmin){
     adminLoginMainBtn.style.display = 'none';
@@ -561,12 +619,10 @@ function updateSessionUI(){
   }
 }
 
-/* little alert helper */
+/* little alert */
 function toast(msg){ alert(msg); }
 
-/* ===========================
-   IST Clock (robust)
-   =========================== */
+/* ===== IST Clock (robust) ===== */
 (function istClock(){
   const el = document.getElementById('clock');
   function tick(){
@@ -588,9 +644,7 @@ function toast(msg){ alert(msg); }
   setInterval(tick, 1000);
 })();
 
-/* ===========================
-   Firebase realtime listener
-   =========================== */
+/* ===== Firebase realtime listener ===== */
 (function initFirebaseListener(){
   const waitForFirebase = () => {
     if(window.firebaseDB && window.firebaseDB.onValue){
@@ -621,9 +675,7 @@ function toast(msg){ alert(msg); }
   waitForFirebase();
 })();
 
-/* ===========================
-   Save helpers
-   =========================== */
+/* ===== Save helpers ===== */
 function saveToFirebase(){
   if(!dbReady()){ console.warn('firebase not ready'); return; }
   const { db, ref, set } = window.firebaseDB;
@@ -637,9 +689,7 @@ function saveToFirebase(){
   }).catch(err => console.error("Firebase write error:", err));
 }
 
-/* ===========================
-   Single update with guard
-   =========================== */
+/* ===== Single update with guard ===== */
 function updateData(key, val){
   const namePart = key.split('_')[0];
   const current = window.currentUser || null;
@@ -663,9 +713,7 @@ function updateData(key, val){
   generateTable();
 }
 
-/* ===========================
-   Admin flows
-   =========================== */
+/* ===== Admin flows ===== */
 function setAdmin(state){
   window.isAdmin = !!state;
   if(window.isAdmin) localStorage.setItem(SESSION_ADMIN_KEY,'1');
@@ -693,9 +741,7 @@ function adminLoginFromOverlay(){
 function adminLoginFromMain(){ showOverlay(); document.getElementById('gateAdminPwd').focus(); }
 function adminLogoutFromMain(){ setAdmin(false); showOverlay(); toast('Admin logged out.'); }
 
-/* ===========================
-   User register/login (overlay)
-   =========================== */
+/* ===== User register/login (overlay) ===== */
 function encodeUserKey(name){ return encodeURIComponent(name.trim().toLowerCase()); }
 
 async function registerUserOverlay(){
@@ -776,9 +822,7 @@ document.getElementById('gateSkipBtn').addEventListener('click', () => {
   if(!restoreSessionFromStorage()) toast('No session found — please login or register.');
 });
 
-/* ===========================
-   Main UI wiring
-   =========================== */
+/* ===== Main UI wiring ===== */
 document.getElementById('addEmployeeBtn').addEventListener('click', ()=>{ 
   if(!window.isAdmin){ alert("Admin access required to add employees."); return; }
   const name=document.getElementById("employeeName").value.trim(); 
@@ -815,11 +859,7 @@ userLogoutBtn.addEventListener('click', ()=> {
   toast('User logged out.');
 });
 
-/* ===========================
-   Datalist & Search helpers
-   - For non-admin users, datalist and search only include their name.
-   - Admin sees full list.
-   =========================== */
+/* ===== Datalist & Search (user-limited visibility) ===== */
 function refreshEmployeeDatalist(){
   const dl = document.getElementById("employeeSuggestions");
   if(!dl) return;
@@ -836,7 +876,6 @@ function applyEmployeeFilter(){
   const nameRaw = input.value.trim();
   if(!nameRaw){ clearEmployeeFilter(); return; }
 
-  // search only in visible list (admins search full list; users search only themselves)
   const available = window.isAdmin ? employees : (window.currentUser ? [window.currentUser] : []);
   let match = available.find(e => e.toLowerCase() === nameRaw.toLowerCase());
   if(!match){
@@ -895,12 +934,7 @@ function updateSearchSummary(employeeName){
   summaryEl.appendChild(makeBadge("Holiday","holiday",counts.Holiday));
 }
 
-/* ===========================
-   Table generation
-   - If logged-in user is not admin: show only their row.
-   - Admin sees all rows as before.
-   - Auto-scroll to today's column preserved.
-   =========================== */
+/* ===== Table generation (user-limited visibility + auto-scroll) ===== */
 function scrollToTableColumn(table, colIndex){
   try{
     const wrapper = document.querySelector('.table-wrapper');
@@ -931,7 +965,6 @@ function generateTable(){
 
   const today = new Date(); today.setHours(0,0,0,0);
 
-  // Determine which employees to show:
   let employeesToShow;
   if(window.isAdmin) employeesToShow = employees.slice();
   else if(window.currentUser) employeesToShow = employees.includes(window.currentUser) ? [window.currentUser] : [window.currentUser];
@@ -967,7 +1000,6 @@ function generateTable(){
     row+="</tr>"; table.innerHTML+=row;
   });
 
-  // Auto-scroll to today's column if month matches
   try {
     const monthVal = document.getElementById("monthPicker").value;
     if(monthVal){
@@ -999,9 +1031,7 @@ function generateTable(){
   if(currentSearch) applyEmployeeFilter();
 }
 
-/* ===========================
-   Bulk update / Excel / load (unchanged)
-   =========================== */
+/* ===== Bulk update / Excel / load (unchanged) ===== */
 function applyBulkUpdate(){
   if(!window.isAdmin){ alert("Bulk update requires admin access."); return; }
   const status = document.getElementById("bulkStatus").value;
@@ -1071,9 +1101,7 @@ function loadFromExcel(event){
   reader.readAsArrayBuffer(file);
 }
 
-/* ===========================
-   Charts (unchanged)
-   =========================== */
+/* ===== Charts (unchanged) ===== */
 const DepthBars = {
   id: 'depthBars',
   afterDatasetsDraw(chart){
@@ -1156,14 +1184,15 @@ function updateCharts(){
     });
   }
 
-  // Bar chart
   const ctxBar = document.getElementById("barChart").getContext("2d");
   const barData={labels:Object.keys(summary), datasets:[{
     data:Object.values(summary),
     backgroundColor: Object.keys(summary).map(k=>createGradient(ctxBar,colors[k])),
     borderRadius: 8
   }]};
+
   const commonLayout = { padding:{top:8,right:16,bottom:28,left:16} };
+
   const barOptions = {
     responsive:true,
     plugins:{
@@ -1186,7 +1215,6 @@ function updateCharts(){
   if(barChart) barChart.destroy();
   barChart=new Chart(ctxBar,{ type:"bar", data:barData, options:barOptions });
 
-  // Stacked chart
   const monthLabel = monthlyView && selectedMonth ? selectedMonth : document.getElementById("monthPicker").value;
   let monthSummary={};
   if(monthLabel){
@@ -1200,19 +1228,52 @@ function updateCharts(){
       }
     });
   }
+
   const statuses=["WFO","WFH","Leave","Holiday"];
   const ctxStacked = document.getElementById("stackedChart").getContext("2d");
   const datasets=statuses.map(s=>({ label:s, data: employees.map(emp => monthSummary[emp]?monthSummary[emp][s]||0:0), backgroundColor:createGradient(ctxStacked,colors[s]), borderRadius:8, maxBarThickness:40 }));
   if(stackedChart) stackedChart.destroy();
   stackedChart=new Chart(ctxStacked,{ type:"bar", data:{labels:employees,datasets}, options:{
     responsive:true, layout: commonLayout,
-    plugins:{ tooltip:{mode:"index"}, legend:{ onClick: function(e, legendItem, legend){ const index = legendItem.datasetIndex; const ci = legend.chart; const alreadyIsolated = ci.data.datasets.every((ds, i) => (i === index && ci.getDatasetMeta(i).hidden !== true) || (i !== index && ci.getDatasetMeta(i).hidden === true)); const allHidden = ci.data.datasets.every((ds, i) => ci.getDatasetMeta(i).hidden === true); if (alreadyIsolated || allHidden) { ci.data.datasets.forEach((ds, i) => { ci.getDatasetMeta(i).hidden = false; }); } else { ci.data.datasets.forEach((ds, i) => { ci.getDatasetMeta(i).hidden = i !== index; }); } ci.update(); } } },
-    scales:{ x:{ stacked:true, offset: true, ticks:{autoSkip:true,maxRotation:45,minRotation:0}, grid:{color:"rgba(255,255,255,0.05)"}}, y:{ stacked:true, beginAtZero:true, grid:{color:"rgba(255,255,255,0.1)"} } },
-    maintainAspectRatio:false, animation:{ duration:800, easing:'easeOutQuart' }
+    plugins:{
+      tooltip:{mode:"index"},
+      legend:{
+        onClick: function(e, legendItem, legend){
+          const index = legendItem.datasetIndex;
+          const ci = legend.chart;
+          const alreadyIsolated = ci.data.datasets.every((ds, i) => 
+            (i === index && ci.getDatasetMeta(i).hidden !== true) ||
+            (i !== index && ci.getDatasetMeta(i).hidden === true)
+          );
+          const allHidden = ci.data.datasets.every((ds, i) => ci.getDatasetMeta(i).hidden === true);
+          if (alreadyIsolated || allHidden) {
+            ci.data.datasets.forEach((ds, i) => {
+              ci.getDatasetMeta(i).hidden = false;
+            });
+          } else {
+            ci.data.datasets.forEach((ds, i) => {
+              ci.getDatasetMeta(i).hidden = i !== index;
+            });
+          }
+          ci.update();
+        }
+      }
+    },
+    scales:{
+      x:{
+        stacked:true,
+        offset: true,
+        ticks:{autoSkip:true,maxRotation:45,minRotation:0},
+        grid:{color:"rgba(255,255,255,0.05)"}
+      }, 
+      y:{stacked:true, beginAtZero:true, grid:{color:"rgba(255,255,255,0.1)"}}
+    },
+    maintainAspectRatio:false,
+    animation:{ duration:800, easing:'easeOutQuart' }
   } });
 }
 
-/* UX: Enter key behavior for search */
+/* UX niceties */
 document.getElementById("employeeSearch").addEventListener("keydown", (e)=>{ if(e.key === "Enter"){ e.preventDefault(); applyEmployeeFilter(); } });
 
 /* Initialize defaults and restore session */
@@ -1255,3 +1316,4 @@ window.removeEmployee = ()=> document.getElementById('removeEmployeeBtn').click(
 </script>
 </body>
 </html>
+
