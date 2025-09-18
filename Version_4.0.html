@@ -1,0 +1,1257 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>Attendance Tracker</title>
+<script src="https://cdn.jsdelivr.net/npm/xlsx/dist/xlsx.full.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&display=swap" rel="stylesheet">
+
+<!-- Firebase v9 modular SDK (CDN module). Initializes Firebase and exposes helpers to window.firebaseDB -->
+<script type="module">
+  import { initializeApp } from "https://www.gstatic.com/firebasejs/9.22.2/firebase-app.js";
+  import { getDatabase, ref, set, get, onValue, update, push, child } from "https://www.gstatic.com/firebasejs/9.22.2/firebase-database.js";
+  import { getAuth, signInAnonymously } from "https://www.gstatic.com/firebasejs/9.22.2/firebase-auth.js";
+
+  // <-- YOUR firebaseConfig pasted here (from your message) -->
+  const firebaseConfig = {
+    apiKey: "AIzaSyDjBqHpawIuc4RKQ3S-dnohCfjSwBvdkk4",
+    authDomain: "attendence-tracker-28d8d.firebaseapp.com",
+    databaseURL: "https://attendence-tracker-28d8d-default-rtdb.asia-southeast1.firebasedatabase.app",
+    projectId: "attendence-tracker-28d8d",
+    storageBucket: "attendence-tracker-28d8d.firebasestorage.app",
+    messagingSenderId: "796356629335",
+    appId: "1:796356629335:web:1be1c346036fff063a6412",
+    measurementId: "G-FPRYP4FCXR"
+  };
+
+  const app = initializeApp(firebaseConfig);
+  const db = getDatabase(app);
+  const auth = getAuth(app);
+
+  // Try anonymous sign-in for a simple secure setup (you can remove if you don't want auth)
+  signInAnonymously(auth).then(() => {
+    console.log("Signed in anonymously to Firebase");
+  }).catch(err => {
+    console.warn("Anonymous sign-in failed (you can ignore this if you use open DB rules):", err);
+  });
+
+  // Expose DB helpers to non-module script below
+  window.firebaseDB = { db, ref, set, get, onValue, update, push, child };
+</script>
+
+<style>
+:root {
+  --card-bg: rgba(30,30,30,0.6);
+  --card-hover: rgba(45,45,45,0.85);
+  --text-color: #f1f1f1;
+  --neon-teal: #00b894;
+  --neon-blue: #0984e3;
+  --button-gradient: linear-gradient(90deg,#0984e3,#6c5ce7);
+  --wfo-color: #2ecc71;
+  --wfh-color: #3498db;
+  --leave-color: #e74c3c;
+  --holiday-color: #f1c40f;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  font-family: 'Poppins', sans-serif;
+  margin:0; padding:0;
+  background: linear-gradient(-45deg, #0b132b, #1c2541, #3a506b, #5bc0be, #1e3c72, #6a11cb, #ff9a9e, #fbc531);
+  background-size: 800% 800%;
+  animation: galaxyShift 40s ease infinite;
+  color: #000;
+  overflow-x: hidden;
+  position: relative;
+}
+@keyframes galaxyShift {
+  0%   { background-position:   0% 50%; }
+  50%  { background-position: 100% 50%; }
+  100% { background-position:   0% 50%; }
+}
+
+/* Overlay for readability */
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.25);
+  pointer-events: none;
+  z-index: 0;
+}
+
+/* Starfield + particle canvases */
+#stars-bg, #particles-bg {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+}
+
+/* RGB Nebula — color-cycling background blob */
+.rgb-nebula{
+  position: fixed;
+  inset: -15vmax;
+  z-index: 0;
+  filter: blur(80px) saturate(140%);
+  opacity: .45;
+  background:
+    radial-gradient(40vmax 40vmax at 20% 30%, #ff0080 0%, transparent 60%),
+    radial-gradient(35vmax 35vmax at 80% 20%, #00e5ff 0%, transparent 60%),
+    radial-gradient(55vmax 55vmax at 50% 75%, #7cff00 0%, transparent 65%);
+  animation: nebulaDrift 28s ease-in-out infinite alternate,
+             hueCycle 18s linear infinite;
+  pointer-events:none;
+}
+@keyframes nebulaDrift {
+  0%   { transform: translate3d(-2vmax,-1vmax,0) scale(1); }
+  100% { transform: translate3d( 2vmax, 1vmax,0) scale(1.05); }
+}
+@keyframes hueCycle { to { filter: hue-rotate(360deg) blur(80px) saturate(140%); } }
+
+header {
+  text-align: center;
+  font-size: 3em;
+  font-weight: 700;
+  padding: 25px;
+  margin-bottom: 20px;
+  position: relative;
+  z-index: 1;
+  background: linear-gradient(90deg, #fff, #00b894, #0984e3, #fff);
+  background-size: 300% 100%;
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  animation: shimmer 8s infinite linear;
+}
+@keyframes shimmer {
+  0% { background-position: 0% 50%; }
+  100% { background-position: 300% 50%; }
+}
+
+/* Live IST clock */
+.clock {
+  position: fixed;
+  top: 12px;
+  right: 18px;
+  z-index: 5;
+  color: #f1f1f1;
+  font-weight: 600;
+  letter-spacing: .3px;
+  padding: 6px 12px;
+  border-radius: 12px;
+  background: #141414; /* solid */
+  border: 1px solid rgba(255,255,255,0.15);
+  box-shadow: 0 6px 16px rgba(0,0,0,0.35);
+  backdrop-filter: none;
+  text-shadow: 0 0 8px rgba(9,132,227,0.6);
+}
+
+.container {
+  display:flex; flex-direction:column; gap:25px; padding:20px; max-width:1200px; margin:auto;
+  position: relative;
+  z-index: 1;
+}
+
+/* Cards — thick slab + neon rim, no tilt */
+.card {
+  background: var(--card-bg);
+  border-radius:20px;
+  padding:25px;
+  color: var(--text-color);
+  backdrop-filter: blur(15px);
+  transition: transform 0.4s ease, box-shadow 0.4s ease, background 0.4s ease;
+  border: 1px solid transparent;
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,.06),
+    0 14px 28px rgba(0,0,0,.35);
+  position: relative;
+  opacity: 0;
+  transform: translateY(20px);
+  animation: fadeInUp 0.8s ease forwards;
+}
+.card:hover { 
+  background: var(--card-hover);
+  transform: translateY(-8px);
+  box-shadow: 0 22px 50px rgba(0,0,0,.48);
+}
+.card::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: 20px;
+  padding: 2px;
+  background: linear-gradient(135deg, #0984e3, #6c5ce7, #00b894);
+  -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+  -webkit-mask-composite: xor;
+          mask-composite: exclude;
+  pointer-events: none;
+  box-shadow:
+    0 0 18px rgba(9,132,227,.28),
+    0 0 26px rgba(0,184,148,.18);
+}
+.card::after{
+  content:"";
+  position:absolute;
+  inset:10px -8px -8px -8px;
+  border-radius:22px;
+  background: linear-gradient(180deg, rgba(0,0,0,.55), rgba(0,0,0,0));
+  filter: blur(10px);
+  z-index:-1;
+  pointer-events:none;
+}
+
+@keyframes fadeInUp { to { opacity: 1; transform: translateY(0); } }
+
+.section-title {
+  font-size:1.6em; margin-bottom:15px; font-weight:600;
+  border-bottom:1px solid rgba(255,255,255,0.2);
+  padding-bottom:8px; letter-spacing:0.5px;
+  color: var(--neon-blue);
+  text-shadow: 0 0 8px rgba(9,132,227,0.8), 0 0 15px rgba(9,132,227,0.5);
+  position: relative;
+}
+.section-title::after{
+  content:"";
+  position:absolute; left:0; right:0; bottom:-2px; height:2px;
+  background: linear-gradient(90deg, #ff3b3b, #ffd93b, #3bff7c, #3bbdff, #9d3bff, #ff3bcb);
+  background-size: 300% 100%;
+  animation: lineShift 10s linear infinite;
+  opacity:.85;
+}
+@keyframes lineShift{ to { background-position: 300% 0; } }
+
+input, #monthPicker, #dayPicker, #monthlyPicker, #fileInput, select {
+  padding:10px 18px; border-radius:25px; border:1px solid #555; outline:none; transition: all 0.3s ease; width:220px;
+  color:#f1f1f1; background: rgba(0,0,0,0.6);
+  font-weight:500;
+}
+input:focus, #monthPicker:focus, #dayPicker:focus, #monthlyPicker:focus, #fileInput:focus, select:focus {
+  box-shadow:0 0 12px var(--neon-teal);
+  transform:scale(1.05);
+}
+
+select:hover {
+  border-color: var(--neon-blue);
+  box-shadow: 0 0 8px var(--neon-blue);
+}
+
+select option[value="WFO"] { background-color: var(--card-bg); color: var(--wfo-color); }
+select option[value="WFH"] { background-color: var(--card-bg); color: var(--wfh-color); }
+select option[value="Leave"] { background-color: var(--card-bg); color: var(--leave-color); }
+select option[value="Holiday"] { background-color: var(--card-bg); color: var(--holiday-color); }
+
+button {
+  padding:10px 22px; border:none; border-radius:25px; cursor:pointer; margin:4px;
+  background: var(--button-gradient);
+  color:white; font-weight:bold; transition:0.3s;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+}
+button:hover { 
+  filter: brightness(1.2); 
+  transform: scale(1.08);
+  box-shadow: 0 0 12px var(--neon-blue), 0 0 18px var(--neon-teal);
+}
+
+/* Table */
+.table-wrapper { overflow-x: auto; max-width: 100%; isolation: isolate; } 
+.table-container { display: inline-block; }
+
+.card.table-card,
+.card.table-card:hover {
+  background: #141414;  
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,.06),
+    0 14px 28px rgba(0,0,0,.35);
+}
+
+table {
+  border-collapse: collapse;
+  min-width: 800px;
+  background: rgba(0,0,0,0.65);
+  color: #f1f1f1;
+}
+
+th, td {
+  border:1px solid rgba(255,255,255,0.2);
+  padding:10px;
+  text-align:center;
+  white-space:nowrap;
+}
+th {
+  background: rgba(20,20,20,0.95);
+  position: sticky;
+  top: 0;
+  z-index: 3;
+}
+
+td:first-child,
+th:first-child{
+  position: sticky;
+  left: 0;
+  background: #141414;     
+  z-index: 10;
+  transform: translateZ(0);
+  will-change: transform;
+  box-shadow: 6px 0 8px rgba(0,0,0,0.35); 
+}
+th:first-child{ z-index: 11; }
+
+table tr:hover td:not(.weekend):not(:first-child) {
+  background: rgba(255,255,255,0.15);
+  box-shadow: inset 0 0 8px rgba(9,132,227,0.5);
+  transition: 0.25s;
+}
+
+table tr:nth-child(even) td { background: rgba(255,255,255,0.05); }
+.weekend { background: rgba(50,50,50,0.5); color:#bbb; pointer-events:none; }
+
+.charts { display: flex; justify-content: space-between; gap: 20px; flex-wrap: nowrap; }
+.chart-container { 
+  flex:1; height:380px; border-radius:18px; padding:20px; 
+  background: rgba(20,20,20,0.55); 
+  display:flex; flex-direction: column; 
+  box-shadow:
+    0 12px 28px rgba(0,0,0,.42),
+    0 0 24px rgba(9,132,227,.16) inset;
+  backdrop-filter: blur(12px);
+  border: 1px solid rgba(255,255,255,0.15);
+  overflow: hidden;
+}
+.chart-title { text-align:center; font-weight:700; font-size:1.4em; margin-bottom:12px; color:#f1f1f1; }
+
+input[type="month"]::-webkit-calendar-picker-indicator,
+input[type="date"]::-webkit-calendar-picker-indicator {
+  filter: invert(1);
+  cursor: pointer;
+}
+
+/* Overlay (login gate) */
+#authOverlay {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  background: linear-gradient(180deg, rgba(2,6,20,0.96), rgba(4,8,16,0.96));
+  padding: 18px;
+}
+.authBox {
+  width: 920px; max-width: 98%; display: grid; grid-template-columns: 1fr 1fr; gap: 16px;
+  background: rgba(20,20,20,0.95); border-radius:12px; padding:18px; color:#f1f1f1;
+  box-shadow: 0 14px 40px rgba(0,0,0,0.6);
+  border: 1px solid rgba(255,255,255,0.04);
+}
+.authBox h3 { margin: 0 0 8px 0; color: var(--neon-blue); }
+.authRow { display:flex; flex-direction:column; gap:8px; }
+.authHint { font-size:13px; color:#9aa8bf; margin-top:8px; }
+
+/* highlight row */
+.highlight-row { box-shadow: inset 0 0 0 2px rgba(9,132,227,0.6); }
+
+/* locked main (blurbed while overlay active) */
+.locked { filter: blur(2px) grayscale(.04); pointer-events: none; user-select: none; opacity: .98 }
+
+</style>
+</head>
+<body>
+
+<!-- Live IST clock -->
+<div id="clock" class="clock">--:--:-- -- | -- --- ----</div>
+
+<!-- Twinkling stars & particle network -->
+<canvas id="stars-bg"></canvas>
+<canvas id="particles-bg"></canvas>
+
+<!-- RGB Nebula layer -->
+<div class="rgb-nebula" aria-hidden="true"></div>
+
+<header>Data Transformers</header>
+
+<!-- AUTH OVERLAY (gate) -->
+<div id="authOverlay" role="dialog" aria-modal="true">
+  <div class="authBox">
+    <div class="authLeft authRow">
+      <h3>User Login / Register</h3>
+      <label for="gateUserName">Name</label>
+      <input id="gateUserName" type="text" placeholder="e.g. Ravi Kumar" autocomplete="off">
+
+      <label for="gateUserPwd">Password</label>
+      <input id="gateUserPwd" type="password" placeholder="Choose / enter password">
+
+      <div style="display:flex; gap:10px; margin-top:8px;">
+        <button id="gateRegisterBtn">Register</button>
+        <button id="gateUserLoginBtn">Login</button>
+      </div>
+
+      <div class="authHint">Register will create your user account and add you to employees so your row appears.</div>
+    </div>
+
+    <div class="authRight authRow">
+      <h3>Admin Login</h3>
+      <label for="gateAdminPwd">Admin password</label>
+      <input id="gateAdminPwd" type="password" placeholder="Admin password">
+
+      <div style="display:flex; gap:10px; margin-top:8px;">
+        <button id="gateAdminLoginBtn">Admin Login</button>
+        <button id="gateSkipBtn" title="Restore session if stored">Restore session / Cancel</button>
+      </div>
+
+      <div class="authHint">If you've logged in previously, press Restore session; otherwise login/register.</div>
+    </div>
+  </div>
+</div>
+
+<div id="mainPage" class="locked">
+
+  <div class="container">
+
+    <div class="card" id="adminCard" style="display:none">
+      <div class="section-title">Employee Management</div>
+      <div id="employeeList">
+        <input type="text" id="employeeName" placeholder="Enter employee name">
+        <button id="addEmployeeBtn">Add</button>
+        <button id="removeEmployeeBtn">Remove</button>
+      </div>
+    </div>
+
+    <!-- TABLE CARD marked solid to avoid sticky transparency -->
+    <div class="card table-card">
+      <div class="section-title">Attendance Table</div>
+
+      <div class="search-card">
+        <span class="mini-title">Search Employee Presence:</span>
+        <input type="text" id="employeeSearch" list="employeeSuggestions" placeholder="Type employee name..." />
+        <datalist id="employeeSuggestions"></datalist>
+        <button id="searchBtn">Search</button>
+        <button id="clearSearchBtn">Clear</button>
+        <div id="searchSummary"></div>
+      </div>
+
+      <label for="monthPicker">Select Month for Table: </label>
+      <input type="month" id="monthPicker" onchange="generateTable()">
+      <div class="table-wrapper">
+        <div class="table-container">
+          <table id="attendanceTable"></table>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="section-title">Bulk Update Attendance</div>
+      <label>Status: </label>
+      <select id="bulkStatus">
+        <option value="WFO">WFO</option>
+        <option value="WFH">WFH</option>
+        <option value="Leave">Leave</option>
+        <option value="Holiday">Holiday</option>
+      </select>
+      <label>Start Day: </label>
+      <input type="number" id="bulkStart" min="1" max="31">
+      <label>End Day: </label>
+      <input type="number" id="bulkEnd" min="1" max="31">
+      <button id="bulkApplyBtn">Apply</button>
+    </div>
+
+    <div class="card">
+      <div class="section-title">Save / Upload Data</div>
+      <button id="saveExcelBtn">SAVE FILE</button>
+      <button id="uploadFileBtn">UPLOAD FILE</button>
+      <input type="file" id="fileInput" accept=".xlsx" style="display:none">
+    </div>
+
+    <div class="card">
+      <div class="section-title">Visualizations</div>
+      <label>
+        <input type="checkbox" id="monthlyToggle" onchange="toggleMonthlyView()"> Show Monthly View
+      </label>
+      <input type="month" id="monthlyPicker" style="display:none; margin-left:20px;" onchange="updateCharts()">
+      <label for="dayPicker" style="margin-left:20px;">Select Day: </label>
+      <input type="date" id="dayPicker" onchange="updateCharts()">
+      <div class="charts" style="margin-top:15px;">
+        <div class="chart-container">
+          <div class="chart-title">Attendance Distribution</div>
+          <canvas id="barChart"></canvas>
+        </div>
+        <div class="chart-container">
+          <div class="chart-title">Monthly Summary</div>
+          <canvas id="stackedChart"></canvas>
+        </div>
+      </div>
+    </div>
+
+    <div style="position:fixed; right:18px; top:70px; z-index:50; display:flex; gap:8px; align-items:center;">
+      <div id="userStatusDisplay" style="color:#fff; font-weight:600"></div>
+      <button id="userLogoutBtn" style="display:none">Logout</button>
+      <button id="adminLoginMainBtn">Admin Login</button>
+      <button id="adminLogoutMainBtn" style="display:none">Admin Logout</button>
+    </div>
+
+  </div>
+</div>
+
+<script>
+/* ===========================
+   Utilities / App State
+   =========================== */
+const SESSION_USER_KEY = 'attendance_current_user';
+const SESSION_ADMIN_KEY = 'attendance_is_admin';
+
+let employees = [], attendanceData = {}, barChart=null, stackedChart=null;
+const colors = {"WFO":"#2ecc71","WFH":"#3498db","Leave":"#e74c3c","Holiday":"#f1c40f"};
+
+function encodeKey(key){ return encodeURIComponent(key); }
+function decodeKey(enc){ try{ return decodeURIComponent(enc); } catch(e){ return enc; } }
+function dbReady(){ return !!window.firebaseDB && !!window.firebaseDB.db; }
+
+async function sha256Hex(str){
+  const enc = new TextEncoder().encode(str);
+  const hashBuf = await crypto.subtle.digest('SHA-256', enc);
+  return Array.from(new Uint8Array(hashBuf)).map(b => b.toString(16).padStart(2,'0')).join('');
+}
+
+/* UI refs */
+const overlay = document.getElementById('authOverlay');
+const mainPage = document.getElementById('mainPage');
+const gateUserName = document.getElementById('gateUserName');
+const gateUserPwd = document.getElementById('gateUserPwd');
+const gateRegisterBtn = document.getElementById('gateRegisterBtn');
+const gateUserLoginBtn = document.getElementById('gateUserLoginBtn');
+const gateAdminPwd = document.getElementById('gateAdminPwd');
+const gateAdminLoginBtn = document.getElementById('gateAdminLoginBtn');
+const gateSkipBtn = document.getElementById('gateSkipBtn');
+
+const addEmployeeBtn = document.getElementById('addEmployeeBtn');
+const removeEmployeeBtn = document.getElementById('removeEmployeeBtn');
+const searchBtn = document.getElementById('searchBtn');
+const clearSearchBtn = document.getElementById('clearSearchBtn');
+const saveExcelBtn = document.getElementById('saveExcelBtn');
+const uploadFileBtn = document.getElementById('uploadFileBtn');
+const fileInput = document.getElementById('fileInput');
+const bulkApplyBtn = document.getElementById('bulkApplyBtn');
+const adminLoginMainBtn = document.getElementById('adminLoginMainBtn');
+const adminLogoutMainBtn = document.getElementById('adminLogoutMainBtn');
+const userLogoutBtn = document.getElementById('userLogoutBtn');
+const userStatusDisplay = document.getElementById('userStatusDisplay');
+const adminCardEl = document.getElementById('adminCard');
+
+if(typeof window.currentUser === 'undefined') window.currentUser = null;
+if(typeof window.isAdmin === 'undefined') window.isAdmin = false;
+
+/* show/hide overlay */
+function showOverlay(){ overlay.style.display = 'flex'; mainPage.classList.add('locked'); }
+function hideOverlay(){ overlay.style.display = 'none'; mainPage.classList.remove('locked'); }
+
+/* update session UI */
+function updateSessionUI(){
+  userStatusDisplay.textContent = window.currentUser ? `Logged in: ${window.currentUser}` : '';
+  userLogoutBtn.style.display = window.currentUser ? '' : 'none';
+  if(window.isAdmin){
+    adminLoginMainBtn.style.display = 'none';
+    adminLogoutMainBtn.style.display = '';
+    if(adminCardEl) adminCardEl.style.display = 'block';
+  } else {
+    adminLoginMainBtn.style.display = '';
+    adminLogoutMainBtn.style.display = 'none';
+    if(adminCardEl) adminCardEl.style.display = 'none';
+  }
+}
+
+/* little alert helper */
+function toast(msg){ alert(msg); }
+
+/* ===========================
+   IST Clock (robust)
+   =========================== */
+(function istClock(){
+  const el = document.getElementById('clock');
+  function tick(){
+    try{
+      const now = new Date();
+      const fmtTime = new Intl.DateTimeFormat('en-IN',{
+        timeZone:'Asia/Kolkata', hour:'numeric', minute:'2-digit', second:'2-digit', hour12:true
+      }).format(now);
+      const fmtDate = new Intl.DateTimeFormat('en-IN',{
+        timeZone:'Asia/Kolkata', weekday:'short', day:'2-digit', month:'short', year:'numeric'
+      }).format(now);
+      if(el) el.textContent = `${fmtTime} | ${fmtDate}`;
+    }catch(e){
+      if(el) el.textContent = new Date().toLocaleString();
+      console.warn('Clock update error', e);
+    }
+  }
+  tick();
+  setInterval(tick, 1000);
+})();
+
+/* ===========================
+   Firebase realtime listener
+   =========================== */
+(function initFirebaseListener(){
+  const waitForFirebase = () => {
+    if(window.firebaseDB && window.firebaseDB.onValue){
+      const { db, ref, onValue } = window.firebaseDB;
+      const rootRef = ref(db, 'attendanceApp');
+      onValue(rootRef, snapshot => {
+        const val = snapshot.val();
+        if(!val){
+          attendanceData = {};
+          employees = [];
+        } else {
+          attendanceData = {};
+          const raw = val.attendanceData || {};
+          for(const encKey in raw){
+            attendanceData[ decodeKey(encKey) ] = raw[encKey];
+          }
+          employees = val.employees || [];
+        }
+        refreshEmployeeDatalist();
+        if(overlay.style.display === 'none') generateTable();
+      }, err => {
+        console.error("Firebase onValue err:", err);
+      });
+    } else {
+      setTimeout(waitForFirebase, 200);
+    }
+  };
+  waitForFirebase();
+})();
+
+/* ===========================
+   Save helpers
+   =========================== */
+function saveToFirebase(){
+  if(!dbReady()){ console.warn('firebase not ready'); return; }
+  const { db, ref, set } = window.firebaseDB;
+  const encoded = {};
+  for(const k in attendanceData){
+    encoded[ encodeKey(k) ] = attendanceData[k];
+  }
+  set(ref(db, 'attendanceApp'), {
+    attendanceData: encoded,
+    employees: employees
+  }).catch(err => console.error("Firebase write error:", err));
+}
+
+/* ===========================
+   Single update with guard
+   =========================== */
+function updateData(key, val){
+  const namePart = key.split('_')[0];
+  const current = window.currentUser || null;
+  if(!window.isAdmin && (!current || namePart !== current)){
+    alert('Permission denied: only the logged-in user or admin can modify this record.');
+    generateTable();
+    return;
+  }
+
+  attendanceData[key] = val;
+
+  if(window.firebaseDB){
+    const { db, ref, set } = window.firebaseDB;
+    const safeKey = encodeKey(key);
+    const valueToSet = (val === "" || val === null || typeof val === 'undefined') ? null : val;
+    set(ref(db, `attendanceApp/attendanceData/${safeKey}`), valueToSet)
+      .catch(err => console.error("Firebase single-key update failed:", err));
+  } else {
+    console.warn("firebaseDB not available; local-only update performed.");
+  }
+  generateTable();
+}
+
+/* ===========================
+   Admin flows
+   =========================== */
+function setAdmin(state){
+  window.isAdmin = !!state;
+  if(window.isAdmin) localStorage.setItem(SESSION_ADMIN_KEY,'1');
+  else localStorage.removeItem(SESSION_ADMIN_KEY);
+  updateSessionUI();
+}
+
+function adminLoginFromOverlay(){
+  const pwd = document.getElementById('gateAdminPwd').value || '';
+  if(!pwd) return toast('Enter admin password.');
+  if(!dbReady()) return toast('Firebase not ready.');
+  const { db, ref, child, get } = window.firebaseDB;
+  get(child(ref(db), 'attendanceApp/adminPassword')).then(snap=>{
+    const stored = snap.exists() ? snap.val() : null;
+    if(stored && String(stored) === String(pwd)){
+      setAdmin(true);
+      hideOverlay();
+      generateTable();
+      toast('Admin login success.');
+    } else {
+      toast('Invalid admin password.');
+    }
+  }).catch(e=>{ console.error(e); toast('Could not verify admin password (see console).'); });
+}
+function adminLoginFromMain(){ showOverlay(); document.getElementById('gateAdminPwd').focus(); }
+function adminLogoutFromMain(){ setAdmin(false); showOverlay(); toast('Admin logged out.'); }
+
+/* ===========================
+   User register/login (overlay)
+   =========================== */
+function encodeUserKey(name){ return encodeURIComponent(name.trim().toLowerCase()); }
+
+async function registerUserOverlay(){
+  const name = (gateUserName.value||'').trim();
+  const pwd = gateUserPwd.value||'';
+  if(!name || !pwd) return toast('Enter name & password to register.');
+  if(!dbReady()) return toast('DB not ready.');
+
+  const { db, ref, child, get, set } = window.firebaseDB;
+  const userRef = child(ref(db), `attendanceApp/users/${encodeUserKey(name)}`);
+  try {
+    const snap = await get(userRef);
+    if(snap.exists()) return toast('User exists — please login instead.');
+    const hash = await sha256Hex(pwd);
+    await set(userRef, { name, passwordHash: hash });
+
+    if(!employees.includes(name)){ employees.push(name); saveToFirebase(); }
+
+    window.currentUser = name;
+    localStorage.setItem(SESSION_USER_KEY, name);
+    updateSessionUI();
+    hideOverlay();
+    generateTable();
+    toast('Registered and logged in.');
+  } catch(e){
+    console.error('register overlay err', e);
+    toast('Registration failed (see console).');
+  }
+}
+
+async function loginUserOverlay(){
+  const name = (gateUserName.value || '').trim();
+  const pwd = gateUserPwd.value || '';
+  if(!name || !pwd) return toast('Enter name & password to login.');
+  if(!dbReady()) return toast('DB not ready.');
+
+  const { db, ref, child, get } = window.firebaseDB;
+  const userRef = child(ref(db), `attendanceApp/users/${encodeUserKey(name)}`);
+  try {
+    const snap = await get(userRef);
+    if(!snap.exists()) return toast('User not found. Use Register if you are new.');
+    const rec = snap.val();
+    const hash = await sha256Hex(pwd);
+    if(String(hash) !== String(rec.passwordHash)) return toast('Invalid password.');
+
+    window.currentUser = rec.name;
+    localStorage.setItem(SESSION_USER_KEY, rec.name);
+    updateSessionUI();
+    hideOverlay();
+    generateTable();
+    toast('Login successful.');
+  } catch(e){
+    console.error('login overlay err', e);
+    toast('Login failed (see console).');
+  }
+}
+
+/* Restore session via Skip button */
+function restoreSessionFromStorage(){
+  const storedUser = localStorage.getItem(SESSION_USER_KEY);
+  const storedAdmin = localStorage.getItem(SESSION_ADMIN_KEY);
+  if(storedUser){ window.currentUser = storedUser; }
+  if(storedAdmin){ window.isAdmin = true; }
+  updateSessionUI();
+  if(window.currentUser || window.isAdmin){
+    hideOverlay();
+    generateTable();
+    return true;
+  }
+  return false;
+}
+
+/* Wire overlay buttons */
+document.getElementById('gateRegisterBtn').addEventListener('click', registerUserOverlay);
+document.getElementById('gateUserLoginBtn').addEventListener('click', loginUserOverlay);
+document.getElementById('gateAdminLoginBtn').addEventListener('click', adminLoginFromOverlay);
+document.getElementById('gateSkipBtn').addEventListener('click', () => {
+  if(!restoreSessionFromStorage()) toast('No session found — please login or register.');
+});
+
+/* ===========================
+   Main UI wiring
+   =========================== */
+document.getElementById('addEmployeeBtn').addEventListener('click', ()=>{ 
+  if(!window.isAdmin){ alert("Admin access required to add employees."); return; }
+  const name=document.getElementById("employeeName").value.trim(); 
+  if(name && !employees.includes(name)){ 
+    employees.push(name); 
+    document.getElementById("employeeName").value=""; 
+    saveToFirebase(); 
+    refreshEmployeeDatalist();
+    generateTable(); 
+  } 
+});
+document.getElementById('removeEmployeeBtn').addEventListener('click', ()=>{ 
+  if(!window.isAdmin){ alert("Admin access required to remove employees."); return; }
+  const name=document.getElementById("employeeName").value.trim();
+  employees = employees.filter(e=>e!==name); 
+  document.getElementById("employeeName").value=""; 
+  saveToFirebase(); 
+  refreshEmployeeDatalist();
+  generateTable(); 
+});
+document.getElementById('searchBtn').addEventListener('click', applyEmployeeFilter);
+document.getElementById('clearSearchBtn').addEventListener('click', clearEmployeeFilter);
+document.getElementById('saveExcelBtn').addEventListener('click', saveToExcel);
+document.getElementById('uploadFileBtn').addEventListener('click', ()=> fileInput.click());
+fileInput.addEventListener('change', loadFromExcel);
+document.getElementById('bulkApplyBtn').addEventListener('click', applyBulkUpdate);
+adminLoginMainBtn.addEventListener('click', adminLoginFromMain);
+adminLogoutMainBtn.addEventListener('click', adminLogoutFromMain);
+userLogoutBtn.addEventListener('click', ()=> {
+  localStorage.removeItem(SESSION_USER_KEY);
+  window.currentUser = null;
+  updateSessionUI();
+  showOverlay();
+  toast('User logged out.');
+});
+
+/* ===========================
+   Datalist & Search helpers
+   - For non-admin users, datalist and search only include their name.
+   - Admin sees full list.
+   =========================== */
+function refreshEmployeeDatalist(){
+  const dl = document.getElementById("employeeSuggestions");
+  if(!dl) return;
+  dl.innerHTML = "";
+  const listToShow = window.isAdmin ? employees.slice().sort((a,b)=>a.localeCompare(b)) : (window.currentUser ? [window.currentUser] : []);
+  listToShow.forEach(emp=>{
+    const opt = document.createElement("option");
+    opt.value = emp;
+    dl.appendChild(opt);
+  });
+}
+function applyEmployeeFilter(){
+  const input = document.getElementById("employeeSearch");
+  const nameRaw = input.value.trim();
+  if(!nameRaw){ clearEmployeeFilter(); return; }
+
+  // search only in visible list (admins search full list; users search only themselves)
+  const available = window.isAdmin ? employees : (window.currentUser ? [window.currentUser] : []);
+  let match = available.find(e => e.toLowerCase() === nameRaw.toLowerCase());
+  if(!match){
+    match = available.find(e => e.toLowerCase().startsWith(nameRaw.toLowerCase())) ||
+            available.find(e => e.toLowerCase().includes(nameRaw.toLowerCase()));
+  }
+  if(!match){ clearEmployeeFilter(); return; }
+
+  const table = document.getElementById("attendanceTable");
+  const rows = Array.from(table.querySelectorAll("tr"));
+  rows.forEach((tr, idx)=>{
+    if(idx === 0){ tr.style.display = ""; return; }
+    const empCell = tr.querySelector("td:first-child");
+    if(!empCell) return;
+    const isTarget = empCell.textContent.trim() === match;
+    tr.style.display = isTarget ? "" : "none";
+    tr.classList.toggle("highlight-row", isTarget);
+  });
+  updateSearchSummary(match);
+  const targetRow = table.querySelector("tr.highlight-row");
+  if(targetRow) targetRow.scrollIntoView({behavior:"smooth", block:"nearest"});
+}
+function clearEmployeeFilter(){
+  const table = document.getElementById("attendanceTable");
+  Array.from(table.querySelectorAll("tr")).forEach((tr, idx)=>{
+    tr.style.display = "";
+    tr.classList.remove("highlight-row");
+  });
+  document.getElementById("searchSummary").innerHTML = "";
+}
+function updateSearchSummary(employeeName){
+  const monthVal = document.getElementById("monthPicker").value;
+  const summaryEl = document.getElementById("searchSummary");
+  summaryEl.innerHTML = "";
+  if(!employeeName || !monthVal) return;
+
+  const [year, monthNum] = monthVal.split("-");
+  const daysInMonth = new Date(year, monthNum, 0).getDate();
+  const counts = { WFO:0, WFH:0, Leave:0, Holiday:0 };
+
+  for(let d=1; d<=daysInMonth; d++){
+    const key = `${employeeName}_${year}-${monthNum}-${d}`;
+    const val = attendanceData[key];
+    if(counts.hasOwnProperty(val)) counts[val]++;
+  }
+
+  const makeBadge = (label, cls, count) => {
+    const span = document.createElement("span");
+    span.className = `badge ${cls}`;
+    span.textContent = `${label}: ${count}`;
+    return span;
+  };
+  summaryEl.appendChild(makeBadge("WFO","wfo",counts.WFO));
+  summaryEl.appendChild(makeBadge("WFH","wfh",counts.WFH));
+  summaryEl.appendChild(makeBadge("Leave","leave",counts.Leave));
+  summaryEl.appendChild(makeBadge("Holiday","holiday",counts.Holiday));
+}
+
+/* ===========================
+   Table generation
+   - If logged-in user is not admin: show only their row.
+   - Admin sees all rows as before.
+   - Auto-scroll to today's column preserved.
+   =========================== */
+function scrollToTableColumn(table, colIndex){
+  try{
+    const wrapper = document.querySelector('.table-wrapper');
+    if(!wrapper) return;
+    const ths = Array.from(table.querySelectorAll('th'));
+    if(colIndex < 0 || colIndex >= ths.length) return;
+    const targetTh = ths[colIndex];
+    const firstTh = ths[0];
+    const targetOffset = targetTh.offsetLeft;
+    const firstWidth = firstTh.offsetWidth;
+    const desiredScrollLeft = Math.max(0, targetOffset - firstWidth - 8);
+    wrapper.scrollTo({ left: desiredScrollLeft, behavior: 'smooth' });
+  } catch(e){ console.warn('scrollToTableColumn error', e); }
+}
+
+function generateTable(){
+  const month=document.getElementById("monthPicker").value; if(!month) return;
+  const [year, monthNum]=month.split("-");
+  const daysInMonth=new Date(year,monthNum,0).getDate();
+  const table=document.getElementById("attendanceTable"); table.innerHTML="";
+  let headerRow=`<tr><th>Employee</th>`;
+  for(let d=1; d<=daysInMonth; d++){
+    const date=new Date(year, monthNum-1,d);
+    const day=date.toLocaleDateString("en-US",{weekday:"short"});
+    headerRow+=`<th>${d}<br>${day}</th>`;
+  }
+  headerRow+="</tr>"; table.innerHTML=headerRow;
+
+  const today = new Date(); today.setHours(0,0,0,0);
+
+  // Determine which employees to show:
+  let employeesToShow;
+  if(window.isAdmin) employeesToShow = employees.slice();
+  else if(window.currentUser) employeesToShow = employees.includes(window.currentUser) ? [window.currentUser] : [window.currentUser];
+  else employeesToShow = [];
+
+  employeesToShow.forEach(emp=>{
+    let row=`<tr${(window.currentUser && window.currentUser === emp) ? ' class="highlight-row"' : '' }><td>${emp}</td>`;
+    for(let d=1; d<=daysInMonth; d++){
+      const date=new Date(year, monthNum-1,d);
+      const key=`${emp}_${year}-${monthNum}-${d}`;
+      let val=attendanceData[key]||"";
+      if(date.getDay()===0||date.getDay()===6){
+        row+=`<td class="weekend">Week Off</td>`;
+      } else if(date < today){
+        row+=`<td style="background:${colors[val]||'transparent'}">${val||""}</td>`;
+      } else {
+        const canEdit = (window.isAdmin === true) || (window.currentUser && window.currentUser === emp);
+        if(canEdit){
+          row+=`<td style="background:${colors[val]||'transparent'}">
+            <select onchange="updateData('${key}', this.value)">
+              <option value="">Select</option>
+              <option value="WFO" ${val==="WFO"?"selected":""}>WFO</option>
+              <option value="WFH" ${val==="WFH"?"selected":""}>WFH</option>
+              <option value="Leave" ${val==="Leave"?"selected":""}>Leave</option>
+              <option value="Holiday" ${val==="Holiday"?"selected":""}>Holiday</option>
+            </select>
+          </td>`;
+        } else {
+          row+=`<td style="background:${colors[val]||'transparent'}">${val||""}</td>`;
+        }
+      }
+    }
+    row+="</tr>"; table.innerHTML+=row;
+  });
+
+  // Auto-scroll to today's column if month matches
+  try {
+    const monthVal = document.getElementById("monthPicker").value;
+    if(monthVal){
+      const [y, m] = monthVal.split("-");
+      const today = new Date();
+      const todayY = today.getFullYear();
+      const todayM = String(today.getMonth()+1).padStart(2,'0');
+      const todayD = today.getDate();
+      if(String(y) === String(todayY) && String(m) === String(todayM)){
+        const ths = Array.from(table.querySelectorAll("th"));
+        let foundIndex = -1;
+        for(let i=1;i<ths.length;i++){
+          const txt = ths[i].innerText.trim().split("\n")[0].trim();
+          if(String(txt) === String(todayD) || Number(txt) === todayD){ foundIndex = i; break; }
+        }
+        if(foundIndex >= 1){
+          scrollToTableColumn(table, foundIndex);
+          const hdr = table.querySelectorAll('th')[foundIndex];
+          if(hdr){ hdr.style.outline = '3px solid rgba(9,132,227,0.6)'; setTimeout(()=>{ hdr.style.outline=''; },2200); }
+        }
+      }
+    }
+  } catch(e){ console.warn("Auto-scroll to today's column failed:", e); }
+
+  updateCharts();
+  refreshEmployeeDatalist();
+
+  const currentSearch = document.getElementById("employeeSearch")?.value?.trim();
+  if(currentSearch) applyEmployeeFilter();
+}
+
+/* ===========================
+   Bulk update / Excel / load (unchanged)
+   =========================== */
+function applyBulkUpdate(){
+  if(!window.isAdmin){ alert("Bulk update requires admin access."); return; }
+  const status = document.getElementById("bulkStatus").value;
+  const start = parseInt(document.getElementById("bulkStart").value);
+  const end = parseInt(document.getElementById("bulkEnd").value);
+  const monthVal = document.getElementById("monthPicker").value;
+  if(!monthVal || isNaN(start) || isNaN(end)) return;
+  const [year, monthNum] = monthVal.split("-");
+  const today = new Date(); today.setHours(0,0,0,0);
+
+  employees.forEach(emp=>{
+    for(let d=start; d<=end; d++){
+      const date = new Date(year, monthNum-1, d);
+      if(date >= today){
+        attendanceData[`${emp}_${year}-${monthNum}-${d}`] = status;
+      }
+    }
+  });
+
+  saveToFirebase();
+  generateTable();
+}
+
+function saveToExcel(){
+  let ws_data = [["Employee","Date","Status"]];
+  for(let key in attendanceData){
+    let [emp,date] = key.split("_");
+    ws_data.push([emp,date,attendanceData[key]]);
+  }
+  let ws = XLSX.utils.aoa_to_sheet(ws_data);
+  let wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, "Attendance");
+  XLSX.writeFile(wb, "Attendance.xlsx");
+}
+
+function loadFromExcel(event){
+  const file = event.target.files[0];
+  if(!file) return;
+  const reader = new FileReader();
+  reader.onload = function(e){
+    const data = new Uint8Array(e.target.result);
+    const workbook = XLSX.read(data, { type: 'array' });
+    const sheet = workbook.Sheets[workbook.SheetNames[0]];
+    const json = XLSX.utils.sheet_to_json(sheet, { header: 1 });
+    const tmpAttendance = {};
+    const tmpEmployees = new Set();
+    let firstDate = null;
+    json.slice(1).forEach(row => {
+      if(row.length >= 3){
+        const [emp,date,val] = row;
+        tmpEmployees.add(emp);
+        tmpAttendance[`${emp}_${date}`] = val;
+        if(!firstDate) firstDate = date;
+      }
+    });
+    attendanceData = tmpAttendance;
+    employees = Array.from(tmpEmployees);
+    if(firstDate){
+      const [year, month] = String(firstDate).split("-");
+      const monthInput = document.getElementById("monthPicker");
+      if (year && month && monthInput) monthInput.value = `${year}-${String(month).padStart(2,'0')}`;
+    }
+    saveToFirebase();
+    refreshEmployeeDatalist();
+    generateTable();
+  };
+  reader.readAsArrayBuffer(file);
+}
+
+/* ===========================
+   Charts (unchanged)
+   =========================== */
+const DepthBars = {
+  id: 'depthBars',
+  afterDatasetsDraw(chart){
+    const {ctx} = chart;
+    ctx.save();
+    ctx.shadowColor = 'rgba(0,0,0,.35)';
+    ctx.shadowBlur = 12;
+    ctx.shadowOffsetY = 6;
+
+    chart.getSortedVisibleDatasetMetas().forEach(meta=>{
+      if (meta.type !== 'bar') return;
+      meta.data.forEach(el=>{
+        if (!el || !el.base) return;
+        const {x,y,base,width} = el.getProps(['x','y','base','width'], true);
+        const left = x - width/2;
+        const top = y;
+        const height = base - y;
+
+        const grad = ctx.createLinearGradient(0, top, 0, top + height);
+        grad.addColorStop(0, 'rgba(255,255,255,.10)');
+        grad.addColorStop(1, 'rgba(0,0,0,.10)');
+
+        ctx.fillStyle = grad;
+        ctx.fillRect(left, top, width, height);
+      });
+    });
+
+    ctx.restore();
+  }
+};
+Chart.register(DepthBars);
+
+function createGradient(ctx, color){
+  const gradient = ctx.createLinearGradient(0,0,0,350);
+  gradient.addColorStop(0, lightenColor(color,0.3));
+  gradient.addColorStop(1, color);
+  return gradient;
+}
+function lightenColor(hex, lum) {
+  hex = String(hex).replace(/[^0-9a-f]/gi, '');
+  if(hex.length<6){ hex=hex[0]+hex[0]+hex[1]+hex[1]+hex[2]+hex[2]; }
+  let rgb="#", c, i;
+  for(i=0;i<3;i++){ c=parseInt(hex.substr(i*2,2),16); c=Math.min(255,Math.max(0,c+Math.round(255*lum))).toString(16); while(c.length<2)c="0"+c; rgb+=c; }
+  return rgb;
+}
+
+function updateCharts(){
+  const monthlyView = document.getElementById("monthlyToggle").checked;
+  const selectedMonth = document.getElementById("monthlyPicker").value;
+  const selectedDate = document.getElementById("dayPicker").value;
+  let summary={}, employeeNames={};
+
+  if(monthlyView && selectedMonth){
+    const [year, monthNum] = selectedMonth.split("-");
+    employees.forEach(emp=>{
+      for(let d=1; d<=new Date(year, monthNum,0).getDate(); d++){
+        const dPadded = String(d).padStart(2,'0');
+        const paddedKey = `${emp}_${year}-${monthNum}-${dPadded}`;
+        const unpaddedKey = `${emp}_${year}-${monthNum}-${d}`;
+        const val = attendanceData[paddedKey] || attendanceData[unpaddedKey];
+        if(colors[val]){
+          summary[val]=(summary[val]||0)+1;
+          employeeNames[val] = employeeNames[val] || [];
+          if(!employeeNames[val].includes(emp)) employeeNames[val].push(emp);
+        }
+      }
+    });
+  } else if(selectedDate){
+    const [y, m, dPad] = selectedDate.split("-");
+    const dUnpadded = String(parseInt(dPad, 10));
+    employees.forEach(emp=>{
+      const paddedKey = `${emp}_${y}-${m}-${dPad}`;
+      const unpaddedKey = `${emp}_${y}-${m}-${dUnpadded}`;
+      const val = attendanceData[paddedKey] || attendanceData[unpaddedKey];
+      if(colors[val]){
+        summary[val]=(summary[val]||0)+1;
+        employeeNames[val] = employeeNames[val] || [];
+        employeeNames[val].push(emp);
+      }
+    });
+  }
+
+  // Bar chart
+  const ctxBar = document.getElementById("barChart").getContext("2d");
+  const barData={labels:Object.keys(summary), datasets:[{
+    data:Object.values(summary),
+    backgroundColor: Object.keys(summary).map(k=>createGradient(ctxBar,colors[k])),
+    borderRadius: 8
+  }]};
+  const commonLayout = { padding:{top:8,right:16,bottom:28,left:16} };
+  const barOptions = {
+    responsive:true,
+    plugins:{
+      legend:{ display:false },
+      tooltip:{
+        callbacks:{
+          label:function(context){
+            let val = context.label;
+            let names = employeeNames[val] || [];
+            return `${val}: ${context.raw}` + (names.length ? ` (${names.join(", ")})` : '');
+          }
+        }
+      }
+    },
+    layout: commonLayout,
+    scales:{ y:{beginAtZero:true, grid:{color:"rgba(255,255,255,0.1)"}}, x:{ offset: true, ticks:{autoSkip:true,maxRotation:45,minRotation:0}, grid:{color:"rgba(255,255,255,0.05)"}} },
+    maintainAspectRatio:false,
+    animation: { duration:800, easing:'easeOutQuart' }
+  };
+  if(barChart) barChart.destroy();
+  barChart=new Chart(ctxBar,{ type:"bar", data:barData, options:barOptions });
+
+  // Stacked chart
+  const monthLabel = monthlyView && selectedMonth ? selectedMonth : document.getElementById("monthPicker").value;
+  let monthSummary={};
+  if(monthLabel){
+    const [year, monthNum] = monthLabel.split("-");
+    employees.forEach(emp=>{
+      for(let d=1; d<=new Date(year, monthNum,0).getDate(); d++){
+        const key = `${emp}_${year}-${monthNum}-${d}`;
+        const val = attendanceData[key];
+        if(!monthSummary[emp]) monthSummary[emp]={};
+        monthSummary[emp][val]=(monthSummary[emp][val]||0)+1;
+      }
+    });
+  }
+  const statuses=["WFO","WFH","Leave","Holiday"];
+  const ctxStacked = document.getElementById("stackedChart").getContext("2d");
+  const datasets=statuses.map(s=>({ label:s, data: employees.map(emp => monthSummary[emp]?monthSummary[emp][s]||0:0), backgroundColor:createGradient(ctxStacked,colors[s]), borderRadius:8, maxBarThickness:40 }));
+  if(stackedChart) stackedChart.destroy();
+  stackedChart=new Chart(ctxStacked,{ type:"bar", data:{labels:employees,datasets}, options:{
+    responsive:true, layout: commonLayout,
+    plugins:{ tooltip:{mode:"index"}, legend:{ onClick: function(e, legendItem, legend){ const index = legendItem.datasetIndex; const ci = legend.chart; const alreadyIsolated = ci.data.datasets.every((ds, i) => (i === index && ci.getDatasetMeta(i).hidden !== true) || (i !== index && ci.getDatasetMeta(i).hidden === true)); const allHidden = ci.data.datasets.every((ds, i) => ci.getDatasetMeta(i).hidden === true); if (alreadyIsolated || allHidden) { ci.data.datasets.forEach((ds, i) => { ci.getDatasetMeta(i).hidden = false; }); } else { ci.data.datasets.forEach((ds, i) => { ci.getDatasetMeta(i).hidden = i !== index; }); } ci.update(); } } },
+    scales:{ x:{ stacked:true, offset: true, ticks:{autoSkip:true,maxRotation:45,minRotation:0}, grid:{color:"rgba(255,255,255,0.05)"}}, y:{ stacked:true, beginAtZero:true, grid:{color:"rgba(255,255,255,0.1)"} } },
+    maintainAspectRatio:false, animation:{ duration:800, easing:'easeOutQuart' }
+  } });
+}
+
+/* UX: Enter key behavior for search */
+document.getElementById("employeeSearch").addEventListener("keydown", (e)=>{ if(e.key === "Enter"){ e.preventDefault(); applyEmployeeFilter(); } });
+
+/* Initialize defaults and restore session */
+window.addEventListener("DOMContentLoaded", ()=>{
+  const monthInput = document.getElementById("monthPicker");
+  if(monthInput && !monthInput.value){
+    const now = new Date();
+    const yyyy = now.getFullYear();
+    const mm = String(now.getMonth()+1).padStart(2,'0');
+    monthInput.value = `${yyyy}-${mm}`;
+  }
+
+  // restore sessions if present
+  const storedUser = localStorage.getItem(SESSION_USER_KEY);
+  const storedAdmin = localStorage.getItem(SESSION_ADMIN_KEY);
+  if(storedUser) window.currentUser = storedUser;
+  if(storedAdmin) window.isAdmin = true;
+  updateSessionUI();
+
+  // show/hide overlay depending on session
+  if(window.currentUser || window.isAdmin){
+    hideOverlay();
+  } else {
+    showOverlay();
+  }
+
+  refreshEmployeeDatalist();
+  generateTable();
+});
+
+/* Expose some functions for inline handlers */
+window.updateData = updateData;
+window.generateTable = generateTable;
+window.saveToExcel = saveToExcel;
+window.loadFromExcel = (e) => { fileInput.files = e.target.files; loadFromExcel({ target: fileInput }); };
+window.applyBulkUpdate = applyBulkUpdate;
+window.addEmployee = ()=> document.getElementById('addEmployeeBtn').click();
+window.removeEmployee = ()=> document.getElementById('removeEmployeeBtn').click();
+
+</script>
+</body>
+</html>
