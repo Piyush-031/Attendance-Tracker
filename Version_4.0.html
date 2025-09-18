@@ -65,6 +65,8 @@ body {
   color: #000;
   overflow-x: hidden;
   position: relative;
+  /* reduced reserved padding so fixed top glass bar doesn't overlap content */
+  padding-top: 64px;
 }
 @keyframes galaxyShift {
   0%   { background-position:   0% 50%; }
@@ -130,18 +132,24 @@ header {
   100% { background-position: 300% 50%; }
 }
 
-/* Topbar (full-width): clock left, user panel right */
+/* Glass Topbar styles (replaced previous topbar) */
 .topbar {
   position: fixed;
-  left: 0;
-  right: 0;
-  top: 12px;
-  z-index: 60;
+  left: 12px;
+  right: 12px;
+  top: 10px; /* slight float from very top */
+  z-index: 9999; /* above page content, below auth overlay (9999) */
   display: flex;
   align-items: center;
   gap: 12px;
-  padding: 0 18px;            /* horizontal padding for both edges */
-  pointer-events: none;      /* allow children to accept clicks via override below */
+  padding: 10px 16px;            /* horizontal padding for both edges */
+  pointer-events: auto;
+  border-radius: 14px;
+  background: linear-gradient(180deg, rgba(10,12,16,0.42), rgba(8,10,12,0.30));
+  backdrop-filter: blur(10px) saturate(120%);
+  -webkit-backdrop-filter: blur(10px) saturate(120%);
+  border: 1px solid rgba(255,255,255,0.06);
+  box-shadow: 0 10px 30px rgba(8,12,20,0.55), 0 1px 0 rgba(255,255,255,0.02) inset;
 }
 
 /* allow children to accept clicks while topbar container ignores pointer events */
@@ -152,8 +160,8 @@ header {
   color: #f1f1f1;
   font-weight: 600;
   letter-spacing: .3px;
-  padding: 8px 12px;
-  border-radius: 12px;
+  padding: 6px 10px;
+  border-radius: 10px;
   background: linear-gradient(90deg, rgba(20,20,20,0.9), rgba(12,12,12,0.95));
   border: 1px solid rgba(255,255,255,0.08);
   box-shadow: 0 8px 20px rgba(0,0,0,0.45), 0 0 10px rgba(9,132,227,0.08) inset;
@@ -392,6 +400,24 @@ input[type="date"]::-webkit-calendar-picker-indicator {
   background: rgba(20,20,20,0.95); border-radius:12px; padding:18px; color:#f1f1f1;
   box-shadow: 0 14px 40px rgba(0,0,0,0.6);
   border: 1px solid rgba(255,255,255,0.04);
+  position: relative;
+  overflow: visible;
+}
+/* RGB rim on auth box — same technique as cards */
+.authBox::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: 12px;
+  padding: 2px;
+  background: linear-gradient(135deg, #0984e3, #6c5ce7, #00b894);
+  -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+  -webkit-mask-composite: xor;
+          mask-composite: exclude;
+  pointer-events: none;
+  box-shadow:
+    0 0 18px rgba(9,132,227,.28),
+    0 0 26px rgba(0,184,148,.18);
 }
 .authBox h3 { margin: 0 0 8px 0; color: var(--neon-blue); }
 .authRow { display:flex; flex-direction:column; gap:8px; }
@@ -408,9 +434,37 @@ input[type="date"]::-webkit-calendar-picker-indicator {
   .clock { font-size:0.8rem; padding:6px 8px; }
   .user-badge { font-size:0.85rem; padding:4px 8px; }
 }
+
+/* Small view toggle style inside Visualizations to match theme */
+.view-toggle {
+  display:inline-flex; gap:8px; align-items:center; margin-bottom:12px;
+}
+.view-toggle .pill {
+  background: rgba(255,255,255,0.03);
+  border-radius: 999px;
+  padding: 6px;
+  display: inline-flex;
+}
+.view-toggle .pill button {
+  background: transparent; border: none; color: #d6eefc; padding: 8px 12px; border-radius:999px; cursor:pointer; font-weight:700;
+}
+.view-toggle .pill button.active {
+  background: linear-gradient(90deg,#0984e3,#6c5ce7);
+  box-shadow: 0 8px 18px rgba(9,132,227,0.12);
+}
+
+/* --- TOP reserved bar spacer (added) --- */
+.top-reserved {
+  height: 10px; /* reserve space so header/content don't get overlapped by fixed topbar */
+  width: 100%;
+  pointer-events: none;
+}
 </style>
 </head>
 <body>
+
+<!-- Top reserved bar (added) -->
+<div class="top-reserved" aria-hidden="true"></div>
 
 <!-- Topbar: clock (left) + spacer + user panel (right) -->
 <div class="topbar" aria-hidden="false">
@@ -531,9 +585,16 @@ input[type="date"]::-webkit-calendar-picker-indicator {
 
     <div class="card">
       <div class="section-title">Visualizations</div>
-      <label>
-        <input type="checkbox" id="monthlyToggle" onchange="toggleMonthlyView()"> Show Monthly View
-      </label>
+
+      <!-- small presentable toggle inside Visualizations (keeps original look) -->
+      <div class="view-toggle" role="group" aria-label="Daily or Monthly view toggle">
+        <div class="pill" id="vizPill">
+          <button id="vizDailyBtn" class="active" type="button">Daily</button>
+          <button id="vizMonthlyBtn" type="button">Monthly</button>
+        </div>
+        <div style="margin-left:12px; color:#dbeffd; font-weight:600;">Switch chart scope</div>
+      </div>
+
       <input type="month" id="monthlyPicker" style="display:none; margin-left:20px;" onchange="updateCharts()">
       <label for="dayPicker" style="margin-left:20px;">Select Day: </label>
       <input type="date" id="dayPicker" onchange="updateCharts()">
@@ -1241,7 +1302,38 @@ Chart.register(DepthBars);
   resize(); requestAnimationFrame(step);
 })();
 
-/* ===== Charts helpers (continued) ===== */
+/* ===== Visualization toggle wiring (inside Visualizations card) ===== */
+(function(){
+  const dailyBtn = document.getElementById('vizDailyBtn');
+  const monthlyBtn = document.getElementById('vizMonthlyBtn');
+  const monthlyPicker = document.getElementById('monthlyPicker');
+  const dayPicker = document.getElementById('dayPicker');
+
+  function setDaily(){
+    dailyBtn.classList.add('active');
+    monthlyBtn.classList.remove('active');
+    if(monthlyPicker) monthlyPicker.style.display = 'none';
+    if(dayPicker) dayPicker.disabled = false;
+    updateCharts();
+  }
+  function setMonthly(){
+    monthlyBtn.classList.add('active');
+    dailyBtn.classList.remove('active');
+    if(monthlyPicker) monthlyPicker.style.display = 'inline-block';
+    if(dayPicker) dayPicker.disabled = true;
+    const monthInput = document.getElementById('monthPicker');
+    if(monthlyPicker && !monthlyPicker.value && monthInput && monthInput.value) monthlyPicker.value = monthInput.value;
+    updateCharts();
+  }
+
+  if(dailyBtn && monthlyBtn){
+    dailyBtn.addEventListener('click', setDaily);
+    monthlyBtn.addEventListener('click', setMonthly);
+    setDaily();
+  }
+})();
+
+/* ===== Charts helpers + updateCharts() ===== */
 function createGradient(ctx, color){
   const gradient = ctx.createLinearGradient(0,0,0,350);
   gradient.addColorStop(0, lightenColor(color,0.3));
@@ -1257,12 +1349,12 @@ function lightenColor(hex, lum) {
 }
 
 function updateCharts(){
-  const monthlyView = document.getElementById("monthlyToggle").checked;
-  const selectedMonth = document.getElementById("monthlyPicker").value;
-  const selectedDate = document.getElementById("dayPicker").value;
+  const monthlyToggleVisible = document.getElementById('monthlyPicker').style.display !== 'none';
+  const selectedMonth = document.getElementById('monthlyPicker').value;
+  const selectedDate = document.getElementById('dayPicker').value;
   let summary={}, employeeNames={};
 
-  if(monthlyView && selectedMonth){
+  if(monthlyToggleVisible && selectedMonth){
     const [year, monthNum] = selectedMonth.split("-");
     employees.forEach(emp=>{
       for(let d=1; d<=new Date(year, monthNum,0).getDate(); d++){
@@ -1323,7 +1415,7 @@ function updateCharts(){
   if(barChart) barChart.destroy();
   barChart=new Chart(ctxBar,{ type:"bar", data:barData, options:barOptions });
 
-  const monthLabel = monthlyView && selectedMonth ? selectedMonth : document.getElementById("monthPicker").value;
+  const monthLabel = (monthlyToggleVisible && selectedMonth) ? selectedMonth : document.getElementById("monthPicker").value;
   let monthSummary={};
   if(monthLabel){
     const [year, monthNum] = monthLabel.split("-");
