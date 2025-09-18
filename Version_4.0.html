@@ -155,7 +155,7 @@ header {
 /* allow children to accept clicks while topbar container ignores pointer events */
 .topbar > * { pointer-events: auto; }
 
-/* Live IST clock (pinned left) */
+ /* Live IST clock (pinned left) */
 .clock {
   color: #f1f1f1;
   font-weight: 600;
@@ -403,7 +403,7 @@ input[type="date"]::-webkit-calendar-picker-indicator {
   position: relative;
   overflow: visible;
 }
-/* RGB rim on auth box — same technique as cards */
+ /* RGB rim on auth box — same technique as cards */
 .authBox::before {
   content: "";
   position: absolute;
@@ -576,7 +576,7 @@ input[type="date"]::-webkit-calendar-picker-indicator {
       <button id="bulkApplyBtn">Apply</button>
     </div>
 
-    <div class="card">
+    <div class="card" id="saveUploadCard">
       <div class="section-title">Save / Upload Data</div>
       <button id="saveExcelBtn">SAVE FILE</button>
       <button id="uploadFileBtn">UPLOAD FILE</button>
@@ -657,6 +657,7 @@ const adminLogoutMainBtn = document.getElementById('adminLogoutMainBtn');
 const userLogoutBtn = document.getElementById('userLogoutBtn');
 const userStatusDisplay = document.getElementById('userStatusDisplay');
 const adminCardEl = document.getElementById('adminCard');
+const saveUploadCardEl = document.getElementById('saveUploadCard');
 
 if(typeof window.currentUser === 'undefined') window.currentUser = null;
 if(typeof window.isAdmin === 'undefined') window.isAdmin = false;
@@ -669,14 +670,18 @@ function hideOverlay(){ overlay.style.display = 'none'; mainPage.classList.remov
 function updateSessionUI(){
   userStatusDisplay.textContent = window.currentUser ? `Logged in: ${window.currentUser}` : 'Not logged';
   userLogoutBtn.style.display = window.currentUser ? '' : 'none';
+
+  // Admin-specific panels
   if(window.isAdmin){
     adminLoginMainBtn.style.display = 'none';
     adminLogoutMainBtn.style.display = '';
     if(adminCardEl) adminCardEl.style.display = 'block';
+    if(saveUploadCardEl) saveUploadCardEl.style.display = '';           // show save/upload
   } else {
     adminLoginMainBtn.style.display = '';
     adminLogoutMainBtn.style.display = 'none';
     if(adminCardEl) adminCardEl.style.display = 'none';
+    if(saveUploadCardEl) saveUploadCardEl.style.display = 'none';       // hide save/upload
   }
 }
 
@@ -907,7 +912,13 @@ document.getElementById('removeEmployeeBtn').addEventListener('click', ()=>{
 document.getElementById('searchBtn').addEventListener('click', applyEmployeeFilter);
 document.getElementById('clearSearchBtn').addEventListener('click', clearEmployeeFilter);
 document.getElementById('saveExcelBtn').addEventListener('click', saveToExcel);
-document.getElementById('uploadFileBtn').addEventListener('click', ()=> fileInput.click());
+document.getElementById('uploadFileBtn').addEventListener('click', ()=> {
+  if(!window.isAdmin){
+    alert("Admin access required to upload attendance data.");
+    return;
+  }
+  fileInput.click();
+});
 fileInput.addEventListener('change', loadFromExcel);
 document.getElementById('bulkApplyBtn').addEventListener('click', applyBulkUpdate);
 adminLoginMainBtn.addEventListener('click', adminLoginFromMain);
@@ -1092,7 +1103,7 @@ function generateTable(){
   if(currentSearch) applyEmployeeFilter();
 }
 
-/* ===== Bulk update / Excel / load (unchanged) ===== */
+/* ===== Bulk update / Excel / load (with admin guards) ===== */
 function applyBulkUpdate(){
   if(!window.isAdmin){ alert("Bulk update requires admin access."); return; }
   const status = document.getElementById("bulkStatus").value;
@@ -1117,6 +1128,11 @@ function applyBulkUpdate(){
 }
 
 function saveToExcel(){
+  if(!window.isAdmin){
+    alert("Admin access required to download attendance data.");
+    return;
+  }
+
   let ws_data = [["Employee","Date","Status"]];
   for(let key in attendanceData){
     let [emp,date] = key.split("_");
@@ -1129,6 +1145,12 @@ function saveToExcel(){
 }
 
 function loadFromExcel(event){
+  if(!window.isAdmin){
+    alert("Admin access required to upload attendance data.");
+    try { if(event && event.target) event.target.value = ""; } catch(e){}
+    return;
+  }
+
   const file = event.target.files[0];
   if(!file) return;
   const reader = new FileReader();
