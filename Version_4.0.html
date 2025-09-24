@@ -65,7 +65,6 @@ body {
   color: #000;
   overflow-x: hidden;
   position: relative;
-  /* reduced reserved padding so fixed top glass bar doesn't overlap content */
   padding-top: 64px;
 }
 @keyframes galaxyShift {
@@ -137,12 +136,12 @@ header {
   position: fixed;
   left: 12px;
   right: 12px;
-  top: 10px; /* slight float from very top */
-  z-index: 9999; /* above page content, below auth overlay (9999) */
+  top: 10px;
+  z-index: 9999;
   display: flex;
   align-items: center;
   gap: 12px;
-  padding: 10px 16px;            /* horizontal padding for both edges */
+  padding: 10px 16px;
   pointer-events: auto;
   border-radius: 14px;
   background: linear-gradient(180deg, rgba(10,12,16,0.42), rgba(8,10,12,0.30));
@@ -202,14 +201,12 @@ header {
 }
 .user-actions button:hover{ transform: translateY(-2px); box-shadow: 0 6px 14px rgba(0,0,0,0.35); }
 
-/* Rest of original styles (kept) */
 .container {
   display:flex; flex-direction:column; gap:25px; padding:20px; max-width:1200px; margin:auto;
   position: relative;
   z-index: 1;
 }
 
-/* Cards — thick slab + neon rim, no tilt */
 .card {
   background: var(--card-bg);
   border-radius:20px;
@@ -403,7 +400,6 @@ input[type="date"]::-webkit-calendar-picker-indicator {
   position: relative;
   overflow: visible;
 }
- /* RGB rim on auth box — same technique as cards */
 .authBox::before {
   content: "";
   position: absolute;
@@ -423,10 +419,8 @@ input[type="date"]::-webkit-calendar-picker-indicator {
 .authRow { display:flex; flex-direction:column; gap:8px; }
 .authHint { font-size:13px; color:#9aa8bf; margin-top:8px; }
 
-/* highlight row */
 .highlight-row { box-shadow: inset 0 0 0 2px rgba(9,132,227,0.6); }
 
-/* locked main (blurbed while overlay active) */
 .locked { filter: blur(2px) grayscale(.04); pointer-events: none; user-select: none; opacity: .98 }
 
 @media (max-width: 760px){
@@ -455,10 +449,36 @@ input[type="date"]::-webkit-calendar-picker-indicator {
 
 /* --- TOP reserved bar spacer (added) --- */
 .top-reserved {
-  height: 10px; /* reserve space so header/content don't get overlapped by fixed topbar */
+  height: 10px;
   width: 100%;
   pointer-events: none;
 }
+
+/* ===== NEW: Capsule badges for search summary ===== */
+.capsule-badges {
+  display:flex;
+  gap:12px;
+  margin-top:10px;
+  flex-wrap:wrap;
+  align-items:center;
+}
+.capsule-badges .badge {
+  padding:8px 14px;
+  border-radius:999px;
+  font-weight:700;
+  color:#111;
+  box-shadow: 0 6px 18px rgba(0,0,0,0.38);
+  min-width:88px;
+  text-align:center;
+  display:inline-block;
+}
+/* Subtle text color override for dark badges (keeps readability) */
+.capsule-badges .badge.light-text { color: #fff; }
+
+/* Make sure Attendance table's search summary area doesn't break layout */
+.search-card { display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-bottom:12px; }
+.search-card .mini-title { color:#dbeffd; font-weight:700; margin-right:6px; }
+#searchSummary { margin-left:8px; display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
 </style>
 </head>
 <body>
@@ -470,7 +490,7 @@ input[type="date"]::-webkit-calendar-picker-indicator {
 <div class="topbar" aria-hidden="false">
   <div id="clock" class="clock">--:--:-- -- | -- --- ----</div>
 
-  <div style="flex:1"></div> <!-- spacer pushes user panel to the far right -->
+  <div style="flex:1"></div>
 
   <div class="user-panel" id="topUserPanel" aria-hidden="false">
     <div class="user-badge" id="userStatusDisplay">Not logged</div>
@@ -529,6 +549,7 @@ input[type="date"]::-webkit-calendar-picker-indicator {
 
   <div class="container">
 
+    <!-- Admin: Employee Management -->
     <div class="card" id="adminCard" style="display:none">
       <div class="section-title">Employee Management</div>
       <div id="employeeList">
@@ -538,7 +559,7 @@ input[type="date"]::-webkit-calendar-picker-indicator {
       </div>
     </div>
 
-    <!-- TABLE CARD marked solid to avoid sticky transparency -->
+    <!-- TABLE CARD -- visible to users and admin -->
     <div class="card table-card">
       <div class="section-title">Attendance Table</div>
 
@@ -560,7 +581,8 @@ input[type="date"]::-webkit-calendar-picker-indicator {
       </div>
     </div>
 
-    <div class="card">
+    <!-- Admin: Bulk Update (admin-only) -->
+    <div class="card" id="bulkCard" style="display:none">
       <div class="section-title">Bulk Update Attendance</div>
       <label>Status: </label>
       <select id="bulkStatus">
@@ -576,17 +598,18 @@ input[type="date"]::-webkit-calendar-picker-indicator {
       <button id="bulkApplyBtn">Apply</button>
     </div>
 
-    <div class="card" id="saveUploadCard">
+    <!-- Admin: Save / Upload Data -->
+    <div class="card" id="saveUploadCard" style="display:none">
       <div class="section-title">Save / Upload Data</div>
       <button id="saveExcelBtn">SAVE FILE</button>
       <button id="uploadFileBtn">UPLOAD FILE</button>
       <input type="file" id="fileInput" accept=".xlsx" style="display:none">
     </div>
 
-    <div class="card">
+    <!-- Admin: Visualizations -->
+    <div class="card" id="vizCard" style="display:none">
       <div class="section-title">Visualizations</div>
 
-      <!-- small presentable toggle inside Visualizations (keeps original look) -->
       <div class="view-toggle" role="group" aria-label="Daily or Monthly view toggle">
         <div class="pill" id="vizPill">
           <button id="vizDailyBtn" class="active" type="button">Daily</button>
@@ -658,6 +681,8 @@ const userLogoutBtn = document.getElementById('userLogoutBtn');
 const userStatusDisplay = document.getElementById('userStatusDisplay');
 const adminCardEl = document.getElementById('adminCard');
 const saveUploadCardEl = document.getElementById('saveUploadCard');
+const bulkCardEl = document.getElementById('bulkCard');
+const vizCardEl = document.getElementById('vizCard');
 
 if(typeof window.currentUser === 'undefined') window.currentUser = null;
 if(typeof window.isAdmin === 'undefined') window.isAdmin = false;
@@ -677,11 +702,15 @@ function updateSessionUI(){
     adminLogoutMainBtn.style.display = '';
     if(adminCardEl) adminCardEl.style.display = 'block';
     if(saveUploadCardEl) saveUploadCardEl.style.display = '';           // show save/upload
+    if(bulkCardEl) bulkCardEl.style.display = 'block';
+    if(vizCardEl) vizCardEl.style.display = 'block';
   } else {
     adminLoginMainBtn.style.display = '';
     adminLogoutMainBtn.style.display = 'none';
     if(adminCardEl) adminCardEl.style.display = 'none';
     if(saveUploadCardEl) saveUploadCardEl.style.display = 'none';       // hide save/upload
+    if(bulkCardEl) bulkCardEl.style.display = 'none';
+    if(vizCardEl) vizCardEl.style.display = 'none';
   }
 }
 
@@ -889,7 +918,7 @@ document.getElementById('gateSkipBtn').addEventListener('click', () => {
 });
 
 /* ===== Main UI wiring ===== */
-document.getElementById('addEmployeeBtn').addEventListener('click', ()=>{ 
+document.getElementById('addEmployeeBtn')?.addEventListener('click', ()=>{ 
   if(!window.isAdmin){ alert("Admin access required to add employees."); return; }
   const name=document.getElementById("employeeName").value.trim(); 
   if(name && !employees.includes(name)){ 
@@ -900,7 +929,7 @@ document.getElementById('addEmployeeBtn').addEventListener('click', ()=>{
     generateTable(); 
   } 
 });
-document.getElementById('removeEmployeeBtn').addEventListener('click', ()=>{ 
+document.getElementById('removeEmployeeBtn')?.addEventListener('click', ()=>{ 
   if(!window.isAdmin){ alert("Admin access required to remove employees."); return; }
   const name=document.getElementById("employeeName").value.trim();
   employees = employees.filter(e=>e!==name); 
@@ -920,7 +949,7 @@ document.getElementById('uploadFileBtn').addEventListener('click', ()=> {
   fileInput.click();
 });
 fileInput.addEventListener('change', loadFromExcel);
-document.getElementById('bulkApplyBtn').addEventListener('click', applyBulkUpdate);
+document.getElementById('bulkApplyBtn')?.addEventListener('click', applyBulkUpdate);
 adminLoginMainBtn.addEventListener('click', adminLoginFromMain);
 adminLogoutMainBtn.addEventListener('click', adminLogoutFromMain);
 userLogoutBtn.addEventListener('click', ()=> {
@@ -994,16 +1023,25 @@ function updateSearchSummary(employeeName){
     if(counts.hasOwnProperty(val)) counts[val]++;
   }
 
-  const makeBadge = (label, cls, count) => {
-    const span = document.createElement("span");
-    span.className = `badge ${cls}`;
+  // create capsule badges with colors
+  const wrapper = document.createElement('div');
+  wrapper.className = 'capsule-badges';
+  const appendBadge = (label, count, color) => {
+    const span = document.createElement('span');
+    span.className = 'badge';
+    // choose appropriate text color for readability (dark text on yellow)
+    if(label === 'Holiday') span.style.color = '#111';
+    else span.style.color = '#fff';
+    span.style.background = color;
     span.textContent = `${label}: ${count}`;
-    return span;
+    wrapper.appendChild(span);
   };
-  summaryEl.appendChild(makeBadge("WFO","wfo",counts.WFO));
-  summaryEl.appendChild(makeBadge("WFH","wfh",counts.WFH));
-  summaryEl.appendChild(makeBadge("Leave","leave",counts.Leave));
-  summaryEl.appendChild(makeBadge("Holiday","holiday",counts.Holiday));
+  appendBadge('WFO', counts.WFO, colors.WFO);
+  appendBadge('WFH', counts.WFH, colors.WFH);
+  appendBadge('Leave', counts.Leave, colors.Leave);
+  appendBadge('Holiday', counts.Holiday, colors.Holiday);
+
+  summaryEl.appendChild(wrapper);
 }
 
 /* ===== Table generation (user-limited visibility + auto-scroll) ===== */
