@@ -361,6 +361,28 @@ table tr:hover td:not(.weekend):not(:first-child) {
 table tr:nth-child(even) td { background: rgba(255,255,255,0.05); }
 .weekend { background: rgba(50,50,50,0.5); color:#bbb; pointer-events:none; }
 
+/* NEW: very noticeable highlight for selected date cells */
+@keyframes pulseGlow {
+  0% { box-shadow: 0 10px 30px rgba(255,255,255,0.06), 0 0 0 rgba(0,0,0,0); transform: translateY(0); }
+  50% { box-shadow: 0 18px 40px rgba(255,255,255,0.09), 0 0 18px rgba(255,255,255,0.06); transform: translateY(-2px); }
+  100% { box-shadow: 0 10px 30px rgba(255,255,255,0.06), 0 0 0 rgba(0,0,0,0); transform: translateY(0); }
+}
+.date-highlight {
+  border-radius: 8px;
+  padding: 6px 8px;
+  outline: 4px solid rgba(255,255,255,0.12);
+  box-shadow: 0 18px 40px rgba(9,132,227,0.12), inset 0 -6px 18px rgba(255,255,255,0.02);
+  animation: pulseGlow 1.6s ease-in-out infinite;
+  transform-origin: center;
+  transition: transform .12s, box-shadow .12s;
+}
+
+/* when a date cell is highlighted, slightly darken its background for contrast */
+.date-highlight[data-status="WFO"] { background: rgba(46,204,113,0.18); }
+.date-highlight[data-status="WFH"] { background: rgba(52,152,219,0.14); }
+.date-highlight[data-status="Leave"] { background: rgba(231,76,60,0.14); }
+.date-highlight[data-status="Holiday"] { background: rgba(241,196,15,0.14); }
+
 .charts { display: flex; justify-content: space-between; gap: 20px; flex-wrap: nowrap; }
 .chart-container { 
   flex:1; height:380px; border-radius:18px; padding:20px; 
@@ -454,7 +476,7 @@ input[type="date"]::-webkit-calendar-picker-indicator {
   pointer-events: none;
 }
 
-/* ===== NEW: Capsule badges for search summary ===== */
+/* ===== Capsule badges for search summary (below search bar) ===== */
 .capsule-badges {
   display:flex;
   gap:12px;
@@ -471,14 +493,28 @@ input[type="date"]::-webkit-calendar-picker-indicator {
   min-width:88px;
   text-align:center;
   display:inline-block;
+  cursor:pointer;
+  user-select:none;
+  transition: transform .12s, box-shadow .12s;
 }
-/* Subtle text color override for dark badges (keeps readability) */
-.capsule-badges .badge.light-text { color: #fff; }
+.capsule-badges .badge:hover { transform: translateY(-3px); box-shadow: 0 10px 26px rgba(0,0,0,0.45); }
+.capsule-badges .badge.active {
+  outline: 3px solid rgba(255,255,255,0.08);
+  transform: scale(1.03);
+}
 
 /* Make sure Attendance table's search summary area doesn't break layout */
 .search-card { display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-bottom:12px; }
 .search-card .mini-title { color:#dbeffd; font-weight:700; margin-right:6px; }
-#searchSummary { margin-left:8px; display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+#searchSummary { margin-left:8px; display:flex; align-items:center; gap:8px; flex-wrap:wrap; max-width:calc(100% - 220px); }
+
+/* small selected employees list */
+.selected-list {
+  display:flex; gap:8px; flex-wrap:wrap; margin-left:8px; align-items:center;
+}
+.selected-list .sel {
+  padding:6px 10px; border-radius:999px; background:rgba(255,255,255,0.04); color:#dbeffd; font-weight:700; cursor:default;
+}
 </style>
 </head>
 <body>
@@ -490,7 +526,7 @@ input[type="date"]::-webkit-calendar-picker-indicator {
 <div class="topbar" aria-hidden="false">
   <div id="clock" class="clock">--:--:-- -- | -- --- ----</div>
 
-  <div style="flex:1"></div>
+  <div style="flex:1"></div> <!-- spacer pushes user panel to the far right -->
 
   <div class="user-panel" id="topUserPanel" aria-hidden="false">
     <div class="user-badge" id="userStatusDisplay">Not logged</div>
@@ -567,8 +603,13 @@ input[type="date"]::-webkit-calendar-picker-indicator {
         <span class="mini-title">Search Employee Presence:</span>
         <input type="text" id="employeeSearch" list="employeeSuggestions" placeholder="Type employee name..." />
         <datalist id="employeeSuggestions"></datalist>
-        <button id="searchBtn">Search</button>
+        <button id="searchBtn">Add</button>
         <button id="clearSearchBtn">Clear</button>
+
+        <!-- selected employees pills -->
+        <div class="selected-list" id="selectedList" aria-live="polite"></div>
+
+        <!-- badges will be rendered here (under search) -->
         <div id="searchSummary"></div>
       </div>
 
@@ -642,7 +683,11 @@ const SESSION_USER_KEY = 'attendance_current_user';
 const SESSION_ADMIN_KEY = 'attendance_is_admin';
 
 let employees = [], attendanceData = {}, barChart=null, stackedChart=null;
+/* color map */
 const colors = {"WFO":"#2ecc71","WFH":"#3498db","Leave":"#e74c3c","Holiday":"#f1c40f"};
+
+/* selection state: multiple employees */
+let selectedEmployees = [];
 
 function encodeKey(key){ return encodeURIComponent(key); }
 function decodeKey(enc){ try{ return decodeURIComponent(enc); } catch(e){ return enc; } }
@@ -683,6 +728,9 @@ const adminCardEl = document.getElementById('adminCard');
 const saveUploadCardEl = document.getElementById('saveUploadCard');
 const bulkCardEl = document.getElementById('bulkCard');
 const vizCardEl = document.getElementById('vizCard');
+
+const selectedListEl = document.getElementById('selectedList');
+const searchSummaryEl = document.getElementById('searchSummary');
 
 if(typeof window.currentUser === 'undefined') window.currentUser = null;
 if(typeof window.isAdmin === 'undefined') window.isAdmin = false;
@@ -938,7 +986,7 @@ document.getElementById('removeEmployeeBtn')?.addEventListener('click', ()=>{
   refreshEmployeeDatalist();
   generateTable(); 
 });
-document.getElementById('searchBtn').addEventListener('click', applyEmployeeFilter);
+searchBtn.addEventListener('click', addEmployeeFromSearch);
 document.getElementById('clearSearchBtn').addEventListener('click', clearEmployeeFilter);
 document.getElementById('saveExcelBtn').addEventListener('click', saveToExcel);
 document.getElementById('uploadFileBtn').addEventListener('click', ()=> {
@@ -972,10 +1020,12 @@ function refreshEmployeeDatalist(){
     dl.appendChild(opt);
   });
 }
-function applyEmployeeFilter(){
+
+/* Add employee to current selection (multiple select behavior) */
+function addEmployeeFromSearch(){
   const input = document.getElementById("employeeSearch");
-  const nameRaw = input.value.trim();
-  if(!nameRaw){ clearEmployeeFilter(); return; }
+  const nameRaw = (input.value || '').trim();
+  if(!nameRaw){ toast('Type an employee name to add.'); return; }
 
   const available = window.isAdmin ? employees : (window.currentUser ? [window.currentUser] : []);
   let match = available.find(e => e.toLowerCase() === nameRaw.toLowerCase());
@@ -983,68 +1033,145 @@ function applyEmployeeFilter(){
     match = available.find(e => e.toLowerCase().startsWith(nameRaw.toLowerCase())) ||
             available.find(e => e.toLowerCase().includes(nameRaw.toLowerCase()));
   }
-  if(!match){ clearEmployeeFilter(); return; }
+  if(!match){ toast('No matching employee available to add.'); return; }
 
+  if(!selectedEmployees.includes(match)){
+    selectedEmployees.push(match);
+    renderSelectedList();
+    // update table to show only selected employees (if any), but allow multiple
+    applySelectionToTable();
+    updateSearchSummaryForSelection();
+    // clear input but keep selection (so user can type next name quickly)
+    input.value = '';
+    input.focus();
+  } else {
+    toast(`${match} already selected.`);
+    input.value = '';
+    input.focus();
+  }
+}
+
+/* render the selected employees pills */
+function renderSelectedList(){
+  selectedListEl.innerHTML = '';
+  selectedEmployees.forEach(emp => {
+    const span = document.createElement('div');
+    span.className = 'sel';
+    span.textContent = emp;
+    // clicking a selected pill will remove that employee from selection
+    span.title = 'Click to remove';
+    span.style.cursor = 'pointer';
+    span.addEventListener('click', ()=> {
+      selectedEmployees = selectedEmployees.filter(e => e !== emp);
+      renderSelectedList();
+      applySelectionToTable();
+      updateSearchSummaryForSelection();
+    });
+    selectedListEl.appendChild(span);
+  });
+}
+
+/* If selection empty -> show all employees (depending on admin/user); else show only selected rows */
+function applySelectionToTable(){
   const table = document.getElementById("attendanceTable");
+  if(!table) return;
   const rows = Array.from(table.querySelectorAll("tr"));
+  if(selectedEmployees.length === 0){
+    // show rows according to session (i.e. normal generateTable decision) — easiest: regenerate
+    generateTable();
+    return;
+  }
   rows.forEach((tr, idx)=>{
-    if(idx === 0){ tr.style.display = ""; return; }
-    const empCell = tr.querySelector("td:first-child");
+    if(idx === 0) { tr.style.display = ''; return; }
+    const empCell = tr.querySelector('td:first-child');
     if(!empCell) return;
-    const isTarget = empCell.textContent.trim() === match;
-    tr.style.display = isTarget ? "" : "none";
-    tr.classList.toggle("highlight-row", isTarget);
+    const emp = empCell.textContent.trim();
+    const shouldShow = selectedEmployees.includes(emp);
+    tr.style.display = shouldShow ? '' : 'none';
+    tr.classList.toggle('highlight-row', shouldShow);
   });
-  updateSearchSummary(match);
-  const targetRow = table.querySelector("tr.highlight-row");
-  if(targetRow) targetRow.scrollIntoView({behavior:"smooth", block:"nearest"});
 }
+
+/* Clear selection and restore search input and table */
 function clearEmployeeFilter(){
-  const table = document.getElementById("attendanceTable");
-  Array.from(table.querySelectorAll("tr")).forEach((tr, idx)=>{
-    tr.style.display = "";
-    tr.classList.remove("highlight-row");
-  });
-  document.getElementById("searchSummary").innerHTML = "";
+  document.getElementById('employeeSearch').value = '';
+  selectedEmployees = [];
+  renderSelectedList();
+  clearDateHighlights();
+  document.getElementById('searchSummary').innerHTML = '';
+  generateTable();
 }
-function updateSearchSummary(employeeName){
-  const monthVal = document.getElementById("monthPicker").value;
-  const summaryEl = document.getElementById("searchSummary");
-  summaryEl.innerHTML = "";
-  if(!employeeName || !monthVal) return;
 
-  const [year, monthNum] = monthVal.split("-");
-  const daysInMonth = new Date(year, monthNum, 0).getDate();
-  const counts = { WFO:0, WFH:0, Leave:0, Holiday:0 };
+/* ===== NEW: highlight for multiple selected employees by status, scroll to first highlighted cell, tooltip grouping ===== */
+function highlightDatesForEmployeesStatus(employeeNames, status){
+  clearDateHighlights();
+  if(!employeeNames || employeeNames.length === 0 || !status) return;
+  const table = document.getElementById('attendanceTable');
+  if(!table) return;
+  let firstHighlightedCell = null;
+  const ths = Array.from(document.querySelectorAll('#attendanceTable th'));
 
-  for(let d=1; d<=daysInMonth; d++){
-    const key = `${employeeName}_${year}-${monthNum}-${d}`;
-    const val = attendanceData[key];
-    if(counts.hasOwnProperty(val)) counts[val]++;
+  // find each employee row and highlight matches
+  for(const emp of employeeNames){
+    const rows = Array.from(table.querySelectorAll('tr'));
+    for(let i=1;i<rows.length;i++){
+      const tr = rows[i];
+      const empCell = tr.querySelector('td:first-child');
+      if(!empCell) continue;
+      if(empCell.textContent.trim() !== emp) continue;
+      const tds = Array.from(tr.querySelectorAll('td')).slice(1);
+      const monthVal = document.getElementById('monthPicker').value;
+      if(!monthVal) continue;
+      const [year, monthNum] = monthVal.split("-");
+      for(let d=0; d<tds.length; d++){
+        const cell = tds[d];
+        if(cell.classList.contains('weekend')) continue;
+        const day = d+1;
+        const key1 = `${emp}_${year}-${monthNum}-${day}`;
+        const val = attendanceData[key1];
+        if(val === status){
+          cell.classList.add('date-highlight');
+          cell.setAttribute('data-status', status);
+          cell.setAttribute('data-emp', emp);
+          if(!firstHighlightedCell) firstHighlightedCell = cell;
+        }
+      }
+      // once processed this emp, break inner loop and proceed next emp
+      break;
+    }
   }
 
-  // create capsule badges with colors
-  const wrapper = document.createElement('div');
-  wrapper.className = 'capsule-badges';
-  const appendBadge = (label, count, color) => {
-    const span = document.createElement('span');
-    span.className = 'badge';
-    // choose appropriate text color for readability (dark text on yellow)
-    if(label === 'Holiday') span.style.color = '#111';
-    else span.style.color = '#fff';
-    span.style.background = color;
-    span.textContent = `${label}: ${count}`;
-    wrapper.appendChild(span);
-  };
-  appendBadge('WFO', counts.WFO, colors.WFO);
-  appendBadge('WFH', counts.WFH, colors.WFH);
-  appendBadge('Leave', counts.Leave, colors.Leave);
-  appendBadge('Holiday', counts.Holiday, colors.Holiday);
+  // scroll to first highlighted if exists
+  if(firstHighlightedCell){
+    try{
+      // ensure the row is visible vertically
+      firstHighlightedCell.parentElement.scrollIntoView({behavior:'smooth', block:'center'});
+      // find column index of the cell
+      const cellIndex = Array.from(firstHighlightedCell.parentElement.children).indexOf(firstHighlightedCell); // index among tds (first td is name)
+      const targetTh = ths[cellIndex];
+      const wrapper = document.querySelector('.table-wrapper');
+      if(wrapper && targetTh){
+        const firstTh = ths[0];
+        const desired = Math.max(0, targetTh.offsetLeft - firstTh.offsetWidth - 8);
+        wrapper.scrollTo({ left: desired, behavior: 'smooth' });
+      } else {
+        firstHighlightedCell.scrollIntoView({behavior:'smooth', block:'nearest', inline:'center'});
+      }
+    } catch(e){ console.warn('scroll to highlighted failed', e); }
+  }
+}
 
-  summaryEl.appendChild(wrapper);
+/* clear highlights */
+function clearDateHighlights(){
+  document.querySelectorAll('.date-highlight').forEach(el => {
+    el.classList.remove('date-highlight');
+    el.removeAttribute('data-status');
+    el.removeAttribute('data-emp');
+  });
 }
 
 /* ===== Table generation (user-limited visibility + auto-scroll) ===== */
+let lastStatusFilter = null;
 function scrollToTableColumn(table, colIndex){
   try{
     const wrapper = document.querySelector('.table-wrapper');
@@ -1137,8 +1264,14 @@ function generateTable(){
   updateCharts();
   refreshEmployeeDatalist();
 
-  const currentSearch = document.getElementById("employeeSearch")?.value?.trim();
-  if(currentSearch) applyEmployeeFilter();
+  // If there's an active selection, apply it (preserve when re-generating)
+  if(selectedEmployees.length > 0){
+    renderSelectedList();
+    applySelectionToTable();
+    updateSearchSummaryForSelection();
+  }
+
+  if(lastStatusFilter) filterRowsByStatus(lastStatusFilter);
 }
 
 /* ===== Bulk update / Excel / load (with admin guards) ===== */
@@ -1533,8 +1666,109 @@ function updateCharts(){
   } });
 }
 
-/* UX niceties */
-document.getElementById("employeeSearch").addEventListener("keydown", (e)=>{ if(e.key === "Enter"){ e.preventDefault(); applyEmployeeFilter(); } });
+/* ===== Update search summary for current selection: build badges aggregated across selectedEmployees,
+           set tooltip grouped by employee, clicking highlights dates across selected employees ===== */
+function updateSearchSummaryForSelection(){
+  const summaryEl = document.getElementById("searchSummary");
+  summaryEl.innerHTML = '';
+  clearDateHighlights();
+
+  if(selectedEmployees.length === 0) return;
+
+  const monthVal = document.getElementById("monthPicker").value;
+  if(!monthVal) return;
+  const [year, monthNum] = monthVal.split("-");
+  const daysInMonth = new Date(year, monthNum, 0).getDate();
+
+  // aggregate counts and dates per employee
+  const counts = { WFO:0, WFH:0, Leave:0, Holiday:0 };
+  const groupedDates = { WFO:{}, WFH:{}, Leave:{}, Holiday:{} }; // groupedDates[status][emp] = [d,d...]
+
+  selectedEmployees.forEach(emp => {
+    for(let d=1; d<=daysInMonth; d++){
+      const key = `${emp}_${year}-${monthNum}-${d}`;
+      const val = attendanceData[key];
+      if(counts.hasOwnProperty(val)){
+        counts[val]++;
+        groupedDates[val][emp] = groupedDates[val][emp] || [];
+        groupedDates[val][emp].push(d);
+      }
+    }
+  });
+
+  // make badges
+  const wrapper = document.createElement('div');
+  wrapper.className = 'capsule-badges';
+  const appendBadge = (label, count, color) => {
+    const span = document.createElement('span');
+    span.className = 'badge';
+    span.dataset.status = label;
+    span.style.background = color;
+    span.textContent = `${label}: ${count}`;
+    if(label === 'Holiday') span.style.color = '#111';
+    else span.style.color = '#fff';
+
+    // title grouped by employee
+    const groups = groupedDates[label];
+    const parts=[];
+    for(const emp of Object.keys(groups)){
+      if(groups[emp].length>0) parts.push(`${emp}: ${groups[emp].join(',')}`);
+    }
+    span.title = parts.length ? `Dates — ${parts.join('  —  ')}` : `No ${label} days for selection`;
+
+    wrapper.appendChild(span);
+  };
+
+  appendBadge('WFO', counts.WFO, colors.WFO);
+  appendBadge('WFH', counts.WFH, colors.WFH);
+  appendBadge('Leave', counts.Leave, colors.Leave);
+  appendBadge('Holiday', counts.Holiday, colors.Holiday);
+
+  summaryEl.appendChild(wrapper);
+
+  // click handling: toggle highlight for selectedEmployees for that status
+  wrapper.addEventListener('click', (ev) => {
+    const badge = ev.target.closest('.badge');
+    if(!badge) return;
+    const status = badge.dataset.status;
+    const currentlyActive = badge.classList.contains('active');
+    // clear existing
+    wrapper.querySelectorAll('.badge').forEach(b => b.classList.remove('active'));
+    clearDateHighlights();
+    if(!currentlyActive){
+      badge.classList.add('active');
+      // highlight across all selectedEmployees
+      highlightDatesForEmployeesStatus(selectedEmployees, status);
+    } else {
+      // toggled off -> cleared already
+    }
+  });
+}
+
+/* Filter table rows to only those employees who have a given status at least once in the selected month
+   (not used by badges — kept for potential use) */
+function filterRowsByStatus(status){
+  const monthVal = document.getElementById("monthPicker").value;
+  if(!monthVal) return;
+  const [year, monthNum] = monthVal.split("-");
+  const daysInMonth = new Date(year, monthNum, 0).getDate();
+  const table = document.getElementById("attendanceTable");
+  Array.from(table.querySelectorAll('tr')).forEach((tr, idx) => {
+    if(idx === 0){ tr.style.display = ""; return; }
+    const empCell = tr.querySelector('td:first-child');
+    if(!empCell) return;
+    const emp = empCell.textContent.trim();
+    let hasStatus = false;
+    for(let d=1; d<=daysInMonth; d++){
+      const key1 = `${emp}_${year}-${monthNum}-${d}`;
+      const val = attendanceData[key1];
+      if(val === status){ hasStatus = true; break; }
+    }
+    tr.style.display = hasStatus ? "" : "none";
+    tr.classList.toggle('highlight-row', hasStatus);
+  });
+  lastStatusFilter = status;
+}
 
 /* Initialize defaults and restore session */
 window.addEventListener("DOMContentLoaded", ()=>{
