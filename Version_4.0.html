@@ -689,6 +689,8 @@ const colors = {"WFO":"#2ecc71","WFH":"#3498db","Leave":"#e74c3c","Holiday":"#f1
 /* selection state: multiple employees */
 let selectedEmployees = [];
 
+let firebaseSynced = false; // <- guard that indicates we've received initial onValue snapshot
+
 function encodeKey(key){ return encodeURIComponent(key); }
 function decodeKey(enc){ try{ return decodeURIComponent(enc); } catch(e){ return enc; } }
 function dbReady(){ return !!window.firebaseDB && !!window.firebaseDB.db; }
@@ -806,6 +808,8 @@ function toast(msg){ alert(msg); }
           }
           employees = val.employees || [];
         }
+        // mark that we've received the initial server snapshot
+        firebaseSynced = true;
         refreshEmployeeDatalist();
         if(overlay.style.display === 'none') generateTable();
       }, err => {
@@ -821,15 +825,30 @@ function toast(msg){ alert(msg); }
 /* ===== Save helpers ===== */
 function saveToFirebase(){
   if(!dbReady()){ console.warn('firebase not ready'); return; }
-  const { db, ref, set } = window.firebaseDB;
+  const { db, ref, update } = window.firebaseDB;
   const encoded = {};
   for(const k in attendanceData){
     encoded[ encodeKey(k) ] = attendanceData[k];
   }
-  set(ref(db, 'attendanceApp'), {
-    attendanceData: encoded,
-    employees: employees
-  }).catch(err => console.error("Firebase write error:", err));
+
+  if(!firebaseSynced){
+    console.warn('Firebase sync not ready; performing safe update to children (update) to avoid overwrite.');
+  }
+
+  // Use update so unspecified children remain untouched
+  update(ref(db), {
+    'attendanceApp/attendanceData': encoded,
+    'attendanceApp/employees': employees
+  }).catch(err => console.error("Firebase update error:", err));
+}
+
+/* Save only employees (used while registering/removing to avoid touching attendanceData) */
+function saveEmployeesOnly(){
+  if(!dbReady()){ console.warn('firebase not ready'); return; }
+  const { db, ref, update } = window.firebaseDB;
+  update(ref(db), {
+    'attendanceApp/employees': employees
+  }).catch(err => console.error("Firebase update employees error:", err));
 }
 
 /* ===== Single update with guard ===== */
@@ -848,6 +867,7 @@ function updateData(key, val){
     const { db, ref, set } = window.firebaseDB;
     const safeKey = encodeKey(key);
     const valueToSet = (val === "" || val === null || typeof val === 'undefined') ? null : val;
+    // write a single attendance key (this remains as-is in your code)
     set(ref(db, `attendanceApp/attendanceData/${safeKey}`), valueToSet)
       .catch(err => console.error("Firebase single-key update failed:", err));
   } else {
@@ -901,7 +921,11 @@ async function registerUserOverlay(){
     const hash = await sha256Hex(pwd);
     await set(userRef, { name, passwordHash: hash });
 
-    if(!employees.includes(name)){ employees.push(name); saveToFirebase(); }
+    // add employee only to employees list (use dedicated function to avoid touching attendanceData)
+    if(!employees.includes(name)){
+      employees.push(name);
+      saveEmployeesOnly(); // only update employees child
+    }
 
     window.currentUser = name;
     localStorage.setItem(SESSION_USER_KEY, name);
@@ -972,7 +996,8 @@ document.getElementById('addEmployeeBtn')?.addEventListener('click', ()=>{
   if(name && !employees.includes(name)){ 
     employees.push(name); 
     document.getElementById("employeeName").value=""; 
-    saveToFirebase(); 
+    // only save employees list (avoid touching attendanceData)
+    saveEmployeesOnly();
     refreshEmployeeDatalist();
     generateTable(); 
   } 
@@ -982,7 +1007,7 @@ document.getElementById('removeEmployeeBtn')?.addEventListener('click', ()=>{
   const name=document.getElementById("employeeName").value.trim();
   employees = employees.filter(e=>e!==name); 
   document.getElementById("employeeName").value=""; 
-  saveToFirebase(); 
+  saveEmployeesOnly();
   refreshEmployeeDatalist();
   generateTable(); 
 });
@@ -1348,6 +1373,7 @@ function loadFromExcel(event){
       const monthInput = document.getElementById("monthPicker");
       if (year && month && monthInput) monthInput.value = `${year}-${String(month).padStart(2,'0')}`;
     }
+    // save both attendanceData and employees safely using update
     saveToFirebase();
     refreshEmployeeDatalist();
     generateTable();
@@ -1601,7 +1627,7 @@ function updateCharts(){
       }
     },
     layout: commonLayout,
-    scales:{ y:{beginAtZero:true, grid:{color:"rgba(255,255,255,0.1)"}}, x:{ offset: true, ticks:{autoSkip:true,maxRotation:45,minRotation:0}, grid:{color:"rgba(255,255,255,0.05)"}} },
+    scales: { y:{beginAtZero:true, grid:{color:"rgba(255,255,255,0.1)"}}, x:{ offset: true, ticks:{autoSkip:true,maxRotation:45,minRotation:0}, grid:{color:"rgba(255,255,255,0.05)"}} },
     maintainAspectRatio:false,
     animation: { duration:800, easing:'easeOutQuart' }
   };
@@ -1810,4 +1836,3 @@ window.removeEmployee = ()=> document.getElementById('removeEmployeeBtn').click(
 </script>
 </body>
 </html>
-
