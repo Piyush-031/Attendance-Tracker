@@ -393,7 +393,7 @@ table tr:nth-child(even) td { background: rgba(255,255,255,0.05); }
     0 0 24px rgba(9,132,227,.16) inset;
   backdrop-filter: blur(12px);
   border: 1px solid rgba(255,255,255,0.15);
-  overflow: hidden;
+  overflow: hidden; /* keep original feel */
 }
 .chart-title { text-align:center; font-weight:700; font-size:1.4em; margin-bottom:12px; color:#f1f1f1; }
 
@@ -514,6 +514,13 @@ input[type="date"]::-webkit-calendar-picker-indicator {
 }
 .selected-list .sel {
   padding:6px 10px; border-radius:999px; background:rgba(255,255,255,0.04); color:#dbeffd; font-weight:700; cursor:default;
+}
+
+/* === Horizontal scroller for combined chart === */
+#chartScroller { 
+  width: 100%;
+  overflow-x: auto;
+  overflow-y: hidden;
 }
 </style>
 </head>
@@ -647,29 +654,28 @@ input[type="date"]::-webkit-calendar-picker-indicator {
       <input type="file" id="fileInput" accept=".xlsx" style="display:none">
     </div>
 
-    <!-- Admin: Visualizations -->
+    <!-- Visualizations (now single combined chart; visible to all users) -->
     <div class="card" id="vizCard" style="display:none">
       <div class="section-title">Visualizations</div>
 
       <div class="view-toggle" role="group" aria-label="Daily or Monthly view toggle">
         <div class="pill" id="vizPill">
-          <button id="vizDailyBtn" class="active" type="button">Daily</button>
-          <button id="vizMonthlyBtn" type="button">Monthly</button>
+          <button id="vizDailyBtn" type="button">Daily</button>
+          <button id="vizMonthlyBtn" class="active" type="button">Monthly</button>
         </div>
         <div style="margin-left:12px; color:#dbeffd; font-weight:600;">Switch chart scope</div>
       </div>
 
-      <input type="month" id="monthlyPicker" style="display:none; margin-left:20px;" onchange="updateCharts()">
+      <input type="month" id="monthlyPicker" style="display:inline-block; margin-left:20px;" onchange="updateCharts()">
       <label for="dayPicker" style="margin-left:20px;">Select Day: </label>
-      <input type="date" id="dayPicker" onchange="updateCharts()">
+      <input type="date" id="dayPicker" onchange="updateCharts()" disabled>
+
       <div class="charts" style="margin-top:15px;">
         <div class="chart-container">
-          <div class="chart-title">Attendance Distribution</div>
-          <canvas id="barChart"></canvas>
-        </div>
-        <div class="chart-container">
-          <div class="chart-title">Monthly Summary</div>
-          <canvas id="stackedChart"></canvas>
+          <div class="chart-title" id="combinedChartTitle">Monthly Summary</div>
+          <div id="chartScroller">
+            <canvas id="combinedChart"></canvas>
+          </div>
         </div>
       </div>
     </div>
@@ -682,14 +688,15 @@ input[type="date"]::-webkit-calendar-picker-indicator {
 const SESSION_USER_KEY = 'attendance_current_user';
 const SESSION_ADMIN_KEY = 'attendance_is_admin';
 
-let employees = [], attendanceData = {}, barChart=null, stackedChart=null;
+let employees = [], attendanceData = {}, barChart=null; // single chart now
 /* color map */
 const colors = {"WFO":"#2ecc71","WFH":"#3498db","Leave":"#e74c3c","Holiday":"#f1c40f"};
 
 /* selection state: multiple employees */
 let selectedEmployees = [];
 
-let firebaseSynced = false; // <- guard that indicates we've received initial onValue snapshot
+let firebaseSynced = false; // <- guard: we received initial server snapshot
+const TOP_N = 10; // show first N employees by default; rest horizontally scrollable
 
 function encodeKey(key){ return encodeURIComponent(key); }
 function decodeKey(enc){ try{ return decodeURIComponent(enc); } catch(e){ return enc; } }
@@ -753,15 +760,16 @@ function updateSessionUI(){
     if(adminCardEl) adminCardEl.style.display = 'block';
     if(saveUploadCardEl) saveUploadCardEl.style.display = '';           // show save/upload
     if(bulkCardEl) bulkCardEl.style.display = 'block';
-    if(vizCardEl) vizCardEl.style.display = 'block';
   } else {
     adminLoginMainBtn.style.display = '';
     adminLogoutMainBtn.style.display = 'none';
     if(adminCardEl) adminCardEl.style.display = 'none';
     if(saveUploadCardEl) saveUploadCardEl.style.display = 'none';       // hide save/upload
     if(bulkCardEl) bulkCardEl.style.display = 'none';
-    if(vizCardEl) vizCardEl.style.display = 'none';
   }
+
+  // Visualization is visible to everyone (users and admin)
+  if(vizCardEl) vizCardEl.style.display = 'block';
 }
 
 /* little alert */
@@ -823,23 +831,43 @@ function toast(msg){ alert(msg); }
 })();
 
 /* ===== Save helpers ===== */
-function saveToFirebase(){
+async function saveToFirebase(){
   if(!dbReady()){ console.warn('firebase not ready'); return; }
-  const { db, ref, update } = window.firebaseDB;
-  const encoded = {};
+  const { db, ref, update, child, get } = window.firebaseDB;
+
+  // Prepare encoded local state
+  const encodedLocal = {};
   for(const k in attendanceData){
-    encoded[ encodeKey(k) ] = attendanceData[k];
+    encodedLocal[ encodeKey(k) ] = attendanceData[k];
   }
 
-  if(!firebaseSynced){
-    console.warn('Firebase sync not ready; performing safe update to children (update) to avoid overwrite.');
-  }
+  try{
+    let toWriteAttendance = encodedLocal;
+    let toWriteEmployees = employees;
 
-  // Use update so unspecified children remain untouched
-  update(ref(db), {
-    'attendanceApp/attendanceData': encoded,
-    'attendanceApp/employees': employees
-  }).catch(err => console.error("Firebase update error:", err));
+    if(!firebaseSynced){
+      // Merge server first to avoid clobbering existing data with empty local
+      const rootRef = ref(db, 'attendanceApp');
+      const snap = await get(rootRef);
+      const server = snap.exists() ? snap.val() : {};
+
+      // attendanceData merge: server + local (local overwrites specific keys it knows)
+      const serverAttendance = server.attendanceData || {};
+      toWriteAttendance = { ...serverAttendance, ...encodedLocal };
+
+      // employees merge (union)
+      const serverEmployees = Array.isArray(server.employees) ? server.employees : [];
+      const setUnion = new Set([ ...serverEmployees, ...employees ]);
+      toWriteEmployees = Array.from(setUnion).sort((a,b)=>a.localeCompare(b));
+    }
+
+    await update(ref(db), {
+      'attendanceApp/attendanceData': toWriteAttendance,
+      'attendanceApp/employees': toWriteEmployees
+    });
+  } catch(err){
+    console.error("Firebase update error:", err);
+  }
 }
 
 /* Save only employees (used while registering/removing to avoid touching attendanceData) */
@@ -867,7 +895,6 @@ function updateData(key, val){
     const { db, ref, set } = window.firebaseDB;
     const safeKey = encodeKey(key);
     const valueToSet = (val === "" || val === null || typeof val === 'undefined') ? null : val;
-    // write a single attendance key (this remains as-is in your code)
     set(ref(db, `attendanceApp/attendanceData/${safeKey}`), valueToSet)
       .catch(err => console.error("Firebase single-key update failed:", err));
   } else {
@@ -921,7 +948,7 @@ async function registerUserOverlay(){
     const hash = await sha256Hex(pwd);
     await set(userRef, { name, passwordHash: hash });
 
-    // add employee only to employees list (use dedicated function to avoid touching attendanceData)
+    // add employee only to employees list (avoid touching attendanceData)
     if(!employees.includes(name)){
       employees.push(name);
       saveEmployeesOnly(); // only update employees child
@@ -1063,10 +1090,8 @@ function addEmployeeFromSearch(){
   if(!selectedEmployees.includes(match)){
     selectedEmployees.push(match);
     renderSelectedList();
-    // update table to show only selected employees (if any), but allow multiple
     applySelectionToTable();
     updateSearchSummaryForSelection();
-    // clear input but keep selection (so user can type next name quickly)
     input.value = '';
     input.focus();
   } else {
@@ -1083,7 +1108,6 @@ function renderSelectedList(){
     const span = document.createElement('div');
     span.className = 'sel';
     span.textContent = emp;
-    // clicking a selected pill will remove that employee from selection
     span.title = 'Click to remove';
     span.style.cursor = 'pointer';
     span.addEventListener('click', ()=> {
@@ -1102,7 +1126,6 @@ function applySelectionToTable(){
   if(!table) return;
   const rows = Array.from(table.querySelectorAll("tr"));
   if(selectedEmployees.length === 0){
-    // show rows according to session (i.e. normal generateTable decision) — easiest: regenerate
     generateTable();
     return;
   }
@@ -1127,7 +1150,7 @@ function clearEmployeeFilter(){
   generateTable();
 }
 
-/* ===== NEW: highlight for multiple selected employees by status, scroll to first highlighted cell, tooltip grouping ===== */
+/* ===== Highlight helpers ===== */
 function highlightDatesForEmployeesStatus(employeeNames, status){
   clearDateHighlights();
   if(!employeeNames || employeeNames.length === 0 || !status) return;
@@ -1136,7 +1159,6 @@ function highlightDatesForEmployeesStatus(employeeNames, status){
   let firstHighlightedCell = null;
   const ths = Array.from(document.querySelectorAll('#attendanceTable th'));
 
-  // find each employee row and highlight matches
   for(const emp of employeeNames){
     const rows = Array.from(table.querySelectorAll('tr'));
     for(let i=1;i<rows.length;i++){
@@ -1161,18 +1183,15 @@ function highlightDatesForEmployeesStatus(employeeNames, status){
           if(!firstHighlightedCell) firstHighlightedCell = cell;
         }
       }
-      // once processed this emp, break inner loop and proceed next emp
       break;
     }
   }
 
-  // scroll to first highlighted if exists
   if(firstHighlightedCell){
     try{
-      // ensure the row is visible vertically
       firstHighlightedCell.parentElement.scrollIntoView({behavior:'smooth', block:'center'});
-      // find column index of the cell
-      const cellIndex = Array.from(firstHighlightedCell.parentElement.children).indexOf(firstHighlightedCell); // index among tds (first td is name)
+      const cellIndex = Array.from(firstHighlightedCell.parentElement.children).indexOf(firstHighlightedCell);
+      const ths = Array.from(document.querySelectorAll('#attendanceTable th'));
       const targetTh = ths[cellIndex];
       const wrapper = document.querySelector('.table-wrapper');
       if(wrapper && targetTh){
@@ -1186,7 +1205,6 @@ function highlightDatesForEmployeesStatus(employeeNames, status){
   }
 }
 
-/* clear highlights */
 function clearDateHighlights(){
   document.querySelectorAll('.date-highlight').forEach(el => {
     el.classList.remove('date-highlight');
@@ -1289,7 +1307,6 @@ function generateTable(){
   updateCharts();
   refreshEmployeeDatalist();
 
-  // If there's an active selection, apply it (preserve when re-generating)
   if(selectedEmployees.length > 0){
     renderSelectedList();
     applySelectionToTable();
@@ -1373,7 +1390,6 @@ function loadFromExcel(event){
       const monthInput = document.getElementById("monthPicker");
       if (year && month && monthInput) monthInput.value = `${year}-${String(month).padStart(2,'0')}`;
     }
-    // save both attendanceData and employees safely using update
     saveToFirebase();
     refreshEmployeeDatalist();
     generateTable();
@@ -1381,7 +1397,7 @@ function loadFromExcel(event){
   reader.readAsArrayBuffer(file);
 }
 
-/* ===== Charts (unchanged) ===== */
+/* ===== Chart plugin ===== */
 const DepthBars = {
   id: 'depthBars',
   afterDatasetsDraw(chart){
@@ -1521,7 +1537,7 @@ Chart.register(DepthBars);
   resize(); requestAnimationFrame(step);
 })();
 
-/* ===== Visualization toggle wiring (inside Visualizations card) ===== */
+/* ===== Visualization toggle wiring (default Monthly/current month) ===== */
 (function(){
   const dailyBtn = document.getElementById('vizDailyBtn');
   const monthlyBtn = document.getElementById('vizMonthlyBtn');
@@ -1548,11 +1564,12 @@ Chart.register(DepthBars);
   if(dailyBtn && monthlyBtn){
     dailyBtn.addEventListener('click', setDaily);
     monthlyBtn.addEventListener('click', setMonthly);
-    setDaily();
+    // DEFAULT: Monthly (current month)
+    setMonthly();
   }
 })();
 
-/* ===== Charts helpers + updateCharts() ===== */
+/* ===== Chart helpers + combined updateCharts() ===== */
 function createGradient(ctx, color){
   const gradient = ctx.createLinearGradient(0,0,0,350);
   gradient.addColorStop(0, lightenColor(color,0.3));
@@ -1568,132 +1585,184 @@ function lightenColor(hex, lum) {
 }
 
 function updateCharts(){
-  const monthlyToggleVisible = document.getElementById('monthlyPicker').style.display !== 'none';
-  const selectedMonth = document.getElementById('monthlyPicker').value;
-  const selectedDate = document.getElementById('dayPicker').value;
-  let summary={}, employeeNames={};
+  const monthlyToggleVisible = document.getElementById('vizMonthlyBtn').classList.contains('active');
+  const combinedTitle = document.getElementById('combinedChartTitle');
+  const monthlyPicker = document.getElementById('monthlyPicker');
+  const dayPicker = document.getElementById('dayPicker');
 
-  if(monthlyToggleVisible && selectedMonth){
-    const [year, monthNum] = selectedMonth.split("-");
-    employees.forEach(emp=>{
-      for(let d=1; d<=new Date(year, monthNum,0).getDate(); d++){
-        const dPadded = String(d).padStart(2,'0');
-        const paddedKey = `${emp}_${year}-${monthNum}-${dPadded}`;
-        const unpaddedKey = `${emp}_${year}-${monthNum}-${d}`;
-        const val = attendanceData[paddedKey] || attendanceData[unpaddedKey];
+  // Default to current month for monthly view
+  if(monthlyToggleVisible){
+    if(!monthlyPicker.value){
+      const monthInput = document.getElementById('monthPicker');
+      if(monthInput && monthInput.value) monthlyPicker.value = monthInput.value;
+      else {
+        const now = new Date();
+        monthlyPicker.value = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}`;
+      }
+    }
+  }
+
+  const summary={}, employeeNames={};
+  const ctx = document.getElementById("combinedChart").getContext("2d");
+
+  if(monthlyToggleVisible){
+    combinedTitle.textContent = "Monthly Summary";
+    dayPicker.disabled = true;
+    monthlyPicker.style.display = 'inline-block';
+
+    const [year, monthNum] = monthlyPicker.value.split("-");
+    const monthSummary = {};
+
+    // Alphabetical order
+    const empsSorted = employees.slice().sort((a,b)=>a.localeCompare(b));
+    const days = new Date(year, monthNum, 0).getDate();
+    empsSorted.forEach(emp=>{
+      for(let d=1; d<=days; d++){
+        const dPad = String(d).padStart(2,'0');
+        const key1 = `${emp}_${year}-${monthNum}-${dPad}`;
+        const key2 = `${emp}_${year}-${monthNum}-${d}`;
+        const val = attendanceData[key1] || attendanceData[key2];
         if(colors[val]){
-          summary[val]=(summary[val]||0)+1;
-          employeeNames[val] = employeeNames[val] || [];
-          if(!employeeNames[val].includes(emp)) employeeNames[val].push(emp);
+          summary[val] = (summary[val]||0) + 1;
+          if(!monthSummary[emp]) monthSummary[emp] = {};
+          monthSummary[emp][val] = (monthSummary[emp][val]||0) + 1;
         }
       }
     });
-  } else if(selectedDate){
-    const [y, m, dPad] = selectedDate.split("-");
+
+    const statuses = ["WFO","WFH","Leave","Holiday"];
+    const labels = empsSorted;
+
+    // Dynamic canvas width for scroll: 80px per employee (show at least TOP_N)
+    const canvas = document.getElementById("combinedChart");
+    const pxPerEmp = 80;
+    const baseWidth = Math.max(TOP_N * pxPerEmp, Math.max(1, labels.length) * pxPerEmp);
+    canvas.style.width = baseWidth + 'px';
+    canvas.width = baseWidth;
+
+    const datasets = statuses.map(s => ({
+      label: s,
+      data: labels.map(emp => monthSummary[emp] ? (monthSummary[emp][s]||0) : 0),
+      backgroundColor: createGradient(ctx, colors[s]),
+      borderRadius: 8,
+      maxBarThickness: 40,
+      stack: 'month'
+    }));
+
+    const options = {
+      responsive: true,
+      maintainAspectRatio: false,
+      layout: { padding:{top:8,right:16,bottom:28,left:16} },
+      plugins: {
+        tooltip: { mode: "index" },
+        legend: {
+          onClick: function(e, legendItem, legend){
+            const index = legendItem.datasetIndex;
+            const ci = legend.chart;
+            const alreadyIsolated = ci.data.datasets.every((ds, i) => 
+              (i === index && ci.getDatasetMeta(i).hidden !== true) ||
+              (i !== index && ci.getDatasetMeta(i).hidden === true)
+            );
+            const allHidden = ci.data.datasets.every((ds, i) => ci.getDatasetMeta(i).hidden === true);
+            if (alreadyIsolated || allHidden) {
+              ci.data.datasets.forEach((ds, i) => { ci.getDatasetMeta(i).hidden = false; });
+            } else {
+              ci.data.datasets.forEach((ds, i) => { ci.getDatasetMeta(i).hidden = i !== index; });
+            }
+            ci.update();
+          }
+        }
+      },
+      scales: {
+        x: {
+          stacked: true,
+          ticks: { autoSkip: false, maxRotation: 45, minRotation: 0 },
+          grid: { color: "rgba(255,255,255,0.05)" }
+        },
+        y: { stacked: true, beginAtZero: true, grid: { color:"rgba(255,255,255,0.1)" } }
+      },
+      animation: { duration: 800, easing: 'easeOutQuart' }
+    };
+
+    if(barChart) barChart.destroy();
+    barChart = new Chart(ctx, { type: "bar", data: { labels, datasets }, options });
+
+    // Scroll so first TOP_N are visible by default
+    const scroller = document.getElementById('chartScroller');
+    scroller.scrollLeft = 0;
+
+  } else {
+    combinedTitle.textContent = "Attendance Distribution";
+    dayPicker.disabled = false;
+    monthlyPicker.style.display = 'none';
+
+    if(!dayPicker.value){
+      const now = new Date();
+      const monthValue = document.getElementById('monthPicker').value;
+      if(monthValue){
+        const [y,m] = monthValue.split("-");
+        const todayInThatMonth = new Date(Number(y), Number(m)-1, Math.min(now.getDate(), new Date(y,m,0).getDate()));
+        dayPicker.value = `${y}-${m}-${String(todayInThatMonth.getDate()).padStart(2,'0')}`;
+      } else {
+        dayPicker.value = now.toISOString().slice(0,10);
+      }
+    }
+
+    const [y, m, dPad] = dayPicker.value.split("-");
     const dUnpadded = String(parseInt(dPad, 10));
-    employees.forEach(emp=>{
-      const paddedKey = `${emp}_${y}-${m}-${dPad}`;
-      const unpaddedKey = `${emp}_${y}-${m}-${dUnpadded}`;
-      const val = attendanceData[paddedKey] || attendanceData[unpaddedKey];
+    const empsSorted = employees.slice().sort((a,b)=>a.localeCompare(b));
+    empsSorted.forEach(emp=>{
+      const k1 = `${emp}_${y}-${m}-${dPad}`;
+      const k2 = `${emp}_${y}-${m}-${dUnpadded}`;
+      const val = attendanceData[k1] || attendanceData[k2];
       if(colors[val]){
         summary[val]=(summary[val]||0)+1;
         employeeNames[val] = employeeNames[val] || [];
         employeeNames[val].push(emp);
       }
     });
-  }
 
-  const ctxBar = document.getElementById("barChart").getContext("2d");
-  const barData={labels:Object.keys(summary), datasets:[{
-    data:Object.values(summary),
-    backgroundColor: Object.keys(summary).map(k=>createGradient(ctxBar,colors[k])),
-    borderRadius: 8
-  }]};
+    const labels = Object.keys(summary);
+    const data = Object.values(summary);
 
-  const commonLayout = { padding:{top:8,right:16,bottom:28,left:16} };
+    const canvas = document.getElementById("combinedChart");
+    canvas.style.width = '100%';
 
-  const barOptions = {
-    responsive:true,
-    plugins:{
-      legend:{ display:false },
-      tooltip:{
-        callbacks:{
-          label:function(context){
-            let val = context.label;
-            let names = employeeNames[val] || [];
-            return `${val}: ${context.raw}` + (names.length ? ` (${names.join(", ")})` : '');
+    const dataSet = [{
+      data,
+      backgroundColor: labels.map(k => createGradient(ctx, colors[k])),
+      borderRadius: 8
+    }];
+
+    const options = {
+      responsive: true,
+      maintainAspectRatio: false,
+      layout: { padding:{top:8,right:16,bottom:28,left:16} },
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          callbacks: {
+            label: function(context){
+              const label = context.label;
+              const names = employeeNames[label] || [];
+              return `${label}: ${context.raw}` + (names.length ? ` (${names.join(", ")})` : '');
+            }
           }
         }
-      }
-    },
-    layout: commonLayout,
-    scales: { y:{beginAtZero:true, grid:{color:"rgba(255,255,255,0.1)"}}, x:{ offset: true, ticks:{autoSkip:true,maxRotation:45,minRotation:0}, grid:{color:"rgba(255,255,255,0.05)"}} },
-    maintainAspectRatio:false,
-    animation: { duration:800, easing:'easeOutQuart' }
-  };
-  if(barChart) barChart.destroy();
-  barChart=new Chart(ctxBar,{ type:"bar", data:barData, options:barOptions });
+      },
+      scales: {
+        y: { beginAtZero: true, grid:{ color:"rgba(255,255,255,0.1)" } },
+        x: { offset:true, ticks:{autoSkip:true,maxRotation:45,minRotation:0}, grid:{ color:"rgba(255,255,255,0.05)" } }
+      },
+      animation: { duration: 800, easing: 'easeOutQuart' }
+    };
 
-  const monthLabel = (monthlyToggleVisible && selectedMonth) ? selectedMonth : document.getElementById("monthPicker").value;
-  let monthSummary={};
-  if(monthLabel){
-    const [year, monthNum] = monthLabel.split("-");
-    employees.forEach(emp=>{
-      for(let d=1; d<=new Date(year, monthNum,0).getDate(); d++){
-        const key = `${emp}_${year}-${monthNum}-${d}`;
-        const val = attendanceData[key];
-        if(!monthSummary[emp]) monthSummary[emp]={};
-        monthSummary[emp][val]=(monthSummary[emp][val]||0)+1;
-      }
-    });
+    if(barChart) barChart.destroy();
+    barChart = new Chart(ctx, { type: "bar", data: { labels, datasets: dataSet }, options });
   }
-
-  const statuses=["WFO","WFH","Leave","Holiday"];
-  const ctxStacked = document.getElementById("stackedChart").getContext("2d");
-  const datasets=statuses.map(s=>({ label:s, data: employees.map(emp => monthSummary[emp]?monthSummary[emp][s]||0:0), backgroundColor:createGradient(ctxStacked,colors[s]), borderRadius:8, maxBarThickness:40 }));
-  if(stackedChart) stackedChart.destroy();
-  stackedChart=new Chart(ctxStacked,{ type:"bar", data:{labels:employees,datasets}, options:{
-    responsive:true, layout: commonLayout,
-    plugins:{
-      tooltip:{mode:"index"},
-      legend:{
-        onClick: function(e, legendItem, legend){
-          const index = legendItem.datasetIndex;
-          const ci = legend.chart;
-          const alreadyIsolated = ci.data.datasets.every((ds, i) => 
-            (i === index && ci.getDatasetMeta(i).hidden !== true) ||
-            (i !== index && ci.getDatasetMeta(i).hidden === true)
-          );
-          const allHidden = ci.data.datasets.every((ds, i) => ci.getDatasetMeta(i).hidden === true);
-          if (alreadyIsolated || allHidden) {
-            ci.data.datasets.forEach((ds, i) => {
-              ci.getDatasetMeta(i).hidden = false;
-            });
-          } else {
-            ci.data.datasets.forEach((ds, i) => {
-              ci.getDatasetMeta(i).hidden = i !== index;
-            });
-          }
-          ci.update();
-        }
-      }
-    },
-    scales:{
-      x:{
-        stacked:true,
-        offset: true,
-        ticks:{autoSkip:true,maxRotation:45,minRotation:0},
-        grid:{color:"rgba(255,255,255,0.05)"}
-      }, 
-      y:{stacked:true, beginAtZero:true, grid:{color:"rgba(255,255,255,0.1)"}}
-    },
-    maintainAspectRatio:false,
-    animation:{ duration:800, easing:'easeOutQuart' }
-  } });
 }
 
-/* ===== Update search summary for current selection: build badges aggregated across selectedEmployees,
-           set tooltip grouped by employee, clicking highlights dates across selected employees ===== */
+/* ===== Search summary badges ===== */
 function updateSearchSummaryForSelection(){
   const summaryEl = document.getElementById("searchSummary");
   summaryEl.innerHTML = '';
@@ -1706,9 +1775,8 @@ function updateSearchSummaryForSelection(){
   const [year, monthNum] = monthVal.split("-");
   const daysInMonth = new Date(year, monthNum, 0).getDate();
 
-  // aggregate counts and dates per employee
   const counts = { WFO:0, WFH:0, Leave:0, Holiday:0 };
-  const groupedDates = { WFO:{}, WFH:{}, Leave:{}, Holiday:{} }; // groupedDates[status][emp] = [d,d...]
+  const groupedDates = { WFO:{}, WFH:{}, Leave:{}, Holiday:{} };
 
   selectedEmployees.forEach(emp => {
     for(let d=1; d<=daysInMonth; d++){
@@ -1722,7 +1790,6 @@ function updateSearchSummaryForSelection(){
     }
   });
 
-  // make badges
   const wrapper = document.createElement('div');
   wrapper.className = 'capsule-badges';
   const appendBadge = (label, count, color) => {
@@ -1734,7 +1801,6 @@ function updateSearchSummaryForSelection(){
     if(label === 'Holiday') span.style.color = '#111';
     else span.style.color = '#fff';
 
-    // title grouped by employee
     const groups = groupedDates[label];
     const parts=[];
     for(const emp of Object.keys(groups)){
@@ -1752,27 +1818,21 @@ function updateSearchSummaryForSelection(){
 
   summaryEl.appendChild(wrapper);
 
-  // click handling: toggle highlight for selectedEmployees for that status
   wrapper.addEventListener('click', (ev) => {
     const badge = ev.target.closest('.badge');
     if(!badge) return;
     const status = badge.dataset.status;
     const currentlyActive = badge.classList.contains('active');
-    // clear existing
     wrapper.querySelectorAll('.badge').forEach(b => b.classList.remove('active'));
     clearDateHighlights();
     if(!currentlyActive){
       badge.classList.add('active');
-      // highlight across all selectedEmployees
       highlightDatesForEmployeesStatus(selectedEmployees, status);
-    } else {
-      // toggled off -> cleared already
     }
   });
 }
 
-/* Filter table rows to only those employees who have a given status at least once in the selected month
-   (not used by badges — kept for potential use) */
+/* Filter rows by status (kept for potential use) */
 function filterRowsByStatus(status){
   const monthVal = document.getElementById("monthPicker").value;
   if(!monthVal) return;
@@ -1806,14 +1866,12 @@ window.addEventListener("DOMContentLoaded", ()=>{
     monthInput.value = `${yyyy}-${mm}`;
   }
 
-  // restore sessions if present
   const storedUser = localStorage.getItem(SESSION_USER_KEY);
   const storedAdmin = localStorage.getItem(SESSION_ADMIN_KEY);
   if(storedUser) window.currentUser = storedUser;
   if(storedAdmin) window.isAdmin = true;
   updateSessionUI();
 
-  // show/hide overlay depending on session
   if(window.currentUser || window.isAdmin){
     hideOverlay();
   } else {
