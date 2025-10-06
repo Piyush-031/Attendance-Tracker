@@ -692,6 +692,9 @@ let employees = [], attendanceData = {}, barChart=null; // single chart now
 /* color map */
 const colors = {"WFO":"#2ecc71","WFH":"#3498db","Leave":"#e74c3c","Holiday":"#f1c40f"};
 
+/* selection state: multiple employees */
+let selectedEmployees = [];
+
 let firebaseSynced = false; // <- guard: we received initial server snapshot
 const TOP_N = 10; // show first N employees by default; rest horizontally scrollable
 
@@ -827,13 +830,7 @@ function toast(msg){ alert(msg); }
   waitForFirebase();
 })();
 
-/* ===== Save helpers (FIXED) ===== */
-
-/**
- * saveToFirebase() remains unchanged for full-state syncs.
- * saveEmployeesOnly() replaced by a safe merge that reads server list first,
- * computes a union, and writes only the merged employees array.
- */
+/* ===== Save helpers ===== */
 async function saveToFirebase(){
   if(!dbReady()){ console.warn('firebase not ready'); return; }
   const { db, ref, update, child, get } = window.firebaseDB;
@@ -864,7 +861,6 @@ async function saveToFirebase(){
       toWriteEmployees = Array.from(setUnion).sort((a,b)=>a.localeCompare(b));
     }
 
-    console.log('saveToFirebase: writing attendance and employees', {attendanceCount: Object.keys(toWriteAttendance).length, employeesCount: toWriteEmployees.length, firebaseSynced});
     await update(ref(db), {
       'attendanceApp/attendanceData': toWriteAttendance,
       'attendanceApp/employees': toWriteEmployees
@@ -874,94 +870,13 @@ async function saveToFirebase(){
   }
 }
 
-/* Safe replacement for saveEmployeesOnly() - reads server and merges */
-async function saveEmployeesOnly(){
-  if(!dbReady()){
-    console.warn('firebase not ready');
-    return;
-  }
-  const { db, ref, child, get, update } = window.firebaseDB;
-  try {
-    const rootRef = ref(db, 'attendanceApp');
-    const snap = await get(rootRef);
-    const server = snap.exists() ? snap.val() : {};
-    const serverEmployees = Array.isArray(server.employees) ? server.employees : [];
-
-    // Merge server + local (unique + sorted)
-    const union = Array.from(new Set([ ...serverEmployees, ...employees ]));
-    union.sort((a,b)=> String(a).localeCompare(String(b)));
-
-    console.log('saveEmployeesOnly: updating merged employees', union);
-    await update(ref(db), { 'attendanceApp/employees': union });
-    employees = union; // sync local
-    refreshEmployeeDatalist();
-  } catch(err){
-    console.error('saveEmployeesOnly error', err);
-  }
-}
-
-/* Add a single employee safely (lightweight merge and write) */
-async function addEmployeeSafe(name){
-  if(!name) return;
-  if(!dbReady()){
-    console.warn('firebase not ready');
-    // still update local copy so UI shows immediate result; but never write to server
-    if(!employees.includes(name)) { employees.push(name); employees.sort((a,b)=>a.localeCompare(b)); refreshEmployeeDatalist(); }
-    return;
-  }
-  const { db, ref, get, update } = window.firebaseDB;
-  try {
-    const rootRef = ref(db, 'attendanceApp');
-    const snap = await get(rootRef);
-    const server = snap.exists() ? snap.val() : {};
-    const serverEmployees = Array.isArray(server.employees) ? server.employees : [];
-
-    if(serverEmployees.includes(name)){
-      // already present
-      employees = serverEmployees.slice();
-      refreshEmployeeDatalist();
-      return;
-    }
-    const union = Array.from(new Set([ ...serverEmployees, name ])).sort((a,b)=> a.localeCompare(b));
-    console.log('addEmployeeSafe: writing single add', name, union);
-    await update(ref(db), { 'attendanceApp/employees': union });
-    employees = union;
-    refreshEmployeeDatalist();
-  } catch(e){
-    console.error('addEmployeeSafe error', e);
-  }
-}
-
-/* Remove a single employee safely (read -> remove -> write) */
-async function removeEmployeeSafe(name){
-  if(!name) return;
-  if(!dbReady()){
-    console.warn('firebase not ready');
-    employees = employees.filter(e=>e!==name);
-    refreshEmployeeDatalist();
-    return;
-  }
-  const { db, ref, get, update } = window.firebaseDB;
-  try {
-    const rootRef = ref(db, 'attendanceApp');
-    const snap = await get(rootRef);
-    const server = snap.exists() ? snap.val() : {};
-    const serverEmployees = Array.isArray(server.employees) ? server.employees : [];
-
-    if(!serverEmployees.includes(name)){
-      // nothing to remove
-      employees = serverEmployees.slice();
-      refreshEmployeeDatalist();
-      return;
-    }
-    const filtered = serverEmployees.filter(e=>e!==name).sort((a,b)=>a.localeCompare(b));
-    console.log('removeEmployeeSafe: writing removal', name, filtered);
-    await update(ref(db), { 'attendanceApp/employees': filtered });
-    employees = filtered;
-    refreshEmployeeDatalist();
-  } catch(e){
-    console.error('removeEmployeeSafe error', e);
-  }
+/* Save only employees (used while registering/removing to avoid touching attendanceData) */
+function saveEmployeesOnly(){
+  if(!dbReady()){ console.warn('firebase not ready'); return; }
+  const { db, ref, update } = window.firebaseDB;
+  update(ref(db), {
+    'attendanceApp/employees': employees
+  }).catch(err => console.error("Firebase update employees error:", err));
 }
 
 /* ===== Single update with guard ===== */
@@ -1019,119 +934,71 @@ function adminLogoutFromMain(){ setAdmin(false); showOverlay(); toast('Admin log
 /* ===== User register/login (overlay) ===== */
 function encodeUserKey(name){ return encodeURIComponent(name.trim().toLowerCase()); }
 
-/* ---------- Replaced registerUserOverlay(), loginUserOverlay(), restoreSessionFromStorage() ---------- */
-
 async function registerUserOverlay(){
   const name = (gateUserName.value||'').trim();
   const pwd = gateUserPwd.value||'';
-  if(!name || !pwd){
-    toast('Enter name & password to register.');
-    return;
-  }
-  if(!dbReady()){
-    toast('DB not ready.');
-    return;
-  }
+  if(!name || !pwd) return toast('Enter name & password to register.');
+  if(!dbReady()) return toast('DB not ready.');
 
   const { db, ref, child, get, set } = window.firebaseDB;
   const userRef = child(ref(db), `attendanceApp/users/${encodeUserKey(name)}`);
-
   try {
-    console.log('[register] checking user existence for:', name);
     const snap = await get(userRef);
-    if(snap.exists()){
-      toast('User exists — please login instead.');
-      return;
+    if(snap.exists()) return toast('User exists — please login instead.');
+    const hash = await sha256Hex(pwd);
+    await set(userRef, { name, passwordHash: hash });
+
+    // add employee only to employees list (avoid touching attendanceData)
+    if(!employees.includes(name)){
+      employees.push(name);
+      saveEmployeesOnly(); // only update employees child
     }
 
-    const hash = await sha256Hex(pwd);
-    // write user record atomically
-    await set(userRef, { name, passwordHash: hash });
-    console.log('[register] user created on server:', name);
-
-    // Add employee safely (ensure we don't clobber server employees)
-    // Use addEmployeeSafe which merges server list & writes only merged array
-    await addEmployeeSafe(name);
-
-    // finalize UI state only after server writes succeeded
     window.currentUser = name;
     localStorage.setItem(SESSION_USER_KEY, name);
     updateSessionUI();
     hideOverlay();
     generateTable();
     toast('Registered and logged in.');
-    return;
   } catch(e){
-    console.error('[register] error:', e);
+    console.error('register overlay err', e);
     toast('Registration failed (see console).');
-    return;
   }
 }
 
 async function loginUserOverlay(){
   const name = (gateUserName.value || '').trim();
   const pwd = gateUserPwd.value || '';
-  if(!name || !pwd){
-    toast('Enter name & password to login.');
-    return;
-  }
-  if(!dbReady()){
-    toast('DB not ready.');
-    return;
-  }
+  if(!name || !pwd) return toast('Enter name & password to login.');
+  if(!dbReady()) return toast('DB not ready.');
 
   const { db, ref, child, get } = window.firebaseDB;
   const userRef = child(ref(db), `attendanceApp/users/${encodeUserKey(name)}`);
-
   try {
-    console.log('[login] fetching user record for:', name);
     const snap = await get(userRef);
-    if(!snap.exists()){
-      toast('User not found. Use Register if you are new.');
-      return;
-    }
+    if(!snap.exists()) return toast('User not found. Use Register if you are new.');
     const rec = snap.val();
-    // Defensive: ensure rec has a passwordHash field
-    if(!rec || !rec.passwordHash){
-      console.warn('[login] user record missing passwordHash:', rec);
-      toast('User record invalid (contact admin).');
-      return;
-    }
-
     const hash = await sha256Hex(pwd);
-    if(String(hash) !== String(rec.passwordHash)){
-      toast('Invalid password.');
-      return;
-    }
+    if(String(hash) !== String(rec.passwordHash)) return toast('Invalid password.');
 
-    // Success: explicitly set session AFTER all checks
-    console.log('[login] login successful for', name);
     window.currentUser = rec.name;
     localStorage.setItem(SESSION_USER_KEY, rec.name);
     updateSessionUI();
     hideOverlay();
     generateTable();
     toast('Login successful.');
-    return;
   } catch(e){
-    console.error('[login] error during login:', e);
+    console.error('login overlay err', e);
     toast('Login failed (see console).');
-    return;
   }
 }
 
-/* Restore session via Skip button — no longer hides overlay unless session exists */
+/* Restore session via Skip button */
 function restoreSessionFromStorage(){
   const storedUser = localStorage.getItem(SESSION_USER_KEY);
   const storedAdmin = localStorage.getItem(SESSION_ADMIN_KEY);
-  if(storedUser){
-    console.log('[restore] restoring stored user session:', storedUser);
-    window.currentUser = storedUser;
-  }
-  if(storedAdmin){
-    console.log('[restore] restoring stored admin flag');
-    window.isAdmin = true;
-  }
+  if(storedUser){ window.currentUser = storedUser; }
+  if(storedAdmin){ window.isAdmin = true; }
   updateSessionUI();
   if(window.currentUser || window.isAdmin){
     hideOverlay();
@@ -1150,22 +1017,24 @@ document.getElementById('gateSkipBtn').addEventListener('click', () => {
 });
 
 /* ===== Main UI wiring ===== */
-document.getElementById('addEmployeeBtn')?.addEventListener('click', async ()=>{ 
+document.getElementById('addEmployeeBtn')?.addEventListener('click', ()=>{ 
   if(!window.isAdmin){ alert("Admin access required to add employees."); return; }
   const name=document.getElementById("employeeName").value.trim(); 
   if(name && !employees.includes(name)){ 
+    employees.push(name); 
     document.getElementById("employeeName").value=""; 
-    // safe add using server merge
-    await addEmployeeSafe(name);
+    // only save employees list (avoid touching attendanceData)
+    saveEmployeesOnly();
     refreshEmployeeDatalist();
     generateTable(); 
   } 
 });
-document.getElementById('removeEmployeeBtn')?.addEventListener('click', async ()=>{ 
+document.getElementById('removeEmployeeBtn')?.addEventListener('click', ()=>{ 
   if(!window.isAdmin){ alert("Admin access required to remove employees."); return; }
   const name=document.getElementById("employeeName").value.trim();
-  document.getElementById("employeeName").value="";
-  await removeEmployeeSafe(name);
+  employees = employees.filter(e=>e!==name); 
+  document.getElementById("employeeName").value=""; 
+  saveEmployeesOnly();
   refreshEmployeeDatalist();
   generateTable(); 
 });
@@ -2025,5 +1894,3 @@ window.removeEmployee = ()=> document.getElementById('removeEmployeeBtn').click(
 </script>
 </body>
 </html>
-
-
