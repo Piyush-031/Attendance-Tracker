@@ -1019,69 +1019,119 @@ function adminLogoutFromMain(){ setAdmin(false); showOverlay(); toast('Admin log
 /* ===== User register/login (overlay) ===== */
 function encodeUserKey(name){ return encodeURIComponent(name.trim().toLowerCase()); }
 
+/* ---------- Replaced registerUserOverlay(), loginUserOverlay(), restoreSessionFromStorage() ---------- */
+
 async function registerUserOverlay(){
   const name = (gateUserName.value||'').trim();
   const pwd = gateUserPwd.value||'';
-  if(!name || !pwd) return toast('Enter name & password to register.');
-  if(!dbReady()) return toast('DB not ready.');
+  if(!name || !pwd){
+    toast('Enter name & password to register.');
+    return;
+  }
+  if(!dbReady()){
+    toast('DB not ready.');
+    return;
+  }
 
   const { db, ref, child, get, set } = window.firebaseDB;
   const userRef = child(ref(db), `attendanceApp/users/${encodeUserKey(name)}`);
-  try {
-    const snap = await get(userRef);
-    if(snap.exists()) return toast('User exists — please login instead.');
-    const hash = await sha256Hex(pwd);
-    await set(userRef, { name, passwordHash: hash });
 
-    // add employee safely to server employees list (avoid overwriting)
+  try {
+    console.log('[register] checking user existence for:', name);
+    const snap = await get(userRef);
+    if(snap.exists()){
+      toast('User exists — please login instead.');
+      return;
+    }
+
+    const hash = await sha256Hex(pwd);
+    // write user record atomically
+    await set(userRef, { name, passwordHash: hash });
+    console.log('[register] user created on server:', name);
+
+    // Add employee safely (ensure we don't clobber server employees)
     // Use addEmployeeSafe which merges server list & writes only merged array
     await addEmployeeSafe(name);
 
+    // finalize UI state only after server writes succeeded
     window.currentUser = name;
     localStorage.setItem(SESSION_USER_KEY, name);
     updateSessionUI();
     hideOverlay();
     generateTable();
     toast('Registered and logged in.');
+    return;
   } catch(e){
-    console.error('register overlay err', e);
+    console.error('[register] error:', e);
     toast('Registration failed (see console).');
+    return;
   }
 }
 
 async function loginUserOverlay(){
   const name = (gateUserName.value || '').trim();
   const pwd = gateUserPwd.value || '';
-  if(!name || !pwd) return toast('Enter name & password to login.');
-  if(!dbReady()) return toast('DB not ready.');
+  if(!name || !pwd){
+    toast('Enter name & password to login.');
+    return;
+  }
+  if(!dbReady()){
+    toast('DB not ready.');
+    return;
+  }
 
   const { db, ref, child, get } = window.firebaseDB;
   const userRef = child(ref(db), `attendanceApp/users/${encodeUserKey(name)}`);
-  try {
-    const snap = await get(userRef);
-    if(!snap.exists()) return toast('User not found. Use Register if you are new.');
-    const rec = snap.val();
-    const hash = await sha256Hex(pwd);
-    if(String(hash) !== String(rec.passwordHash)) return toast('Invalid password.');
 
+  try {
+    console.log('[login] fetching user record for:', name);
+    const snap = await get(userRef);
+    if(!snap.exists()){
+      toast('User not found. Use Register if you are new.');
+      return;
+    }
+    const rec = snap.val();
+    // Defensive: ensure rec has a passwordHash field
+    if(!rec || !rec.passwordHash){
+      console.warn('[login] user record missing passwordHash:', rec);
+      toast('User record invalid (contact admin).');
+      return;
+    }
+
+    const hash = await sha256Hex(pwd);
+    if(String(hash) !== String(rec.passwordHash)){
+      toast('Invalid password.');
+      return;
+    }
+
+    // Success: explicitly set session AFTER all checks
+    console.log('[login] login successful for', name);
     window.currentUser = rec.name;
     localStorage.setItem(SESSION_USER_KEY, rec.name);
     updateSessionUI();
     hideOverlay();
     generateTable();
     toast('Login successful.');
+    return;
   } catch(e){
-    console.error('login overlay err', e);
+    console.error('[login] error during login:', e);
     toast('Login failed (see console).');
+    return;
   }
 }
 
-/* Restore session via Skip button */
+/* Restore session via Skip button — no longer hides overlay unless session exists */
 function restoreSessionFromStorage(){
   const storedUser = localStorage.getItem(SESSION_USER_KEY);
   const storedAdmin = localStorage.getItem(SESSION_ADMIN_KEY);
-  if(storedUser){ window.currentUser = storedUser; }
-  if(storedAdmin){ window.isAdmin = true; }
+  if(storedUser){
+    console.log('[restore] restoring stored user session:', storedUser);
+    window.currentUser = storedUser;
+  }
+  if(storedAdmin){
+    console.log('[restore] restoring stored admin flag');
+    window.isAdmin = true;
+  }
   updateSessionUI();
   if(window.currentUser || window.isAdmin){
     hideOverlay();
@@ -1975,4 +2025,3 @@ window.removeEmployee = ()=> document.getElementById('removeEmployeeBtn').click(
 </script>
 </body>
 </html>
-
