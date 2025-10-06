@@ -1702,8 +1702,7 @@ Chart.register(DepthBars);
 
 /* ===== Chart helpers + combined updateCharts() ===== */
 function createGradient(ctx, color){
-  const gradient = ctx.createLinearGradient
-(0,0,0,350);
+  const gradient = ctx.createLinearGradient(0,0,0,350);
   gradient.addColorStop(0, lightenColor(color,0.3));
   gradient.addColorStop(1, color);
   return gradient;
@@ -2026,4 +2025,5 @@ window.removeEmployee = ()=> document.getElementById('removeEmployeeBtn').click(
 </script>
 </body>
 </html>
+
 
