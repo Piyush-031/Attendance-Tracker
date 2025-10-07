@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8" />
-<title>Attendance Tracker</title>
+<title>Attendance Tracker (Patched)</title>
 <script src="https://cdn.jsdelivr.net/npm/xlsx/dist/xlsx.full.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&display=swap" rel="stylesheet">
@@ -870,13 +870,20 @@ async function saveToFirebase(){
   }
 }
 
-/* Save only employees (used while registering/removing to avoid touching attendanceData) */
-function saveEmployeesOnly(){
+/* Save only employees (used while registering/removing to avoid touching attendanceData) - MERGE SAFE */
+async function saveEmployeesOnly(){
   if(!dbReady()){ console.warn('firebase not ready'); return; }
-  const { db, ref, update } = window.firebaseDB;
-  update(ref(db), {
-    'attendanceApp/employees': employees
-  }).catch(err => console.error("Firebase update employees error:", err));
+  const { db, ref, child, get, update } = window.firebaseDB;
+  try {
+    const rootRef = ref(db, 'attendanceApp');
+    const snap = await get(child(rootRef, 'employees'));
+    const serverEmployees = Array.isArray(snap.val()) ? snap.val() : [];
+    const merged = Array.from(new Set([ ...serverEmployees, ...employees ])).sort((a,b)=>a.localeCompare(b));
+    await update(rootRef, { employees: merged });
+    employees = merged;
+  } catch(err) {
+    console.error("saveEmployeesOnly (merged) error:", err);
+  }
 }
 
 /* ===== Single update with guard ===== */
@@ -951,7 +958,8 @@ async function registerUserOverlay(){
     // add employee only to employees list (avoid touching attendanceData)
     if(!employees.includes(name)){
       employees.push(name);
-      saveEmployeesOnly(); // only update employees child
+      // NEW: use merge-safe employees write
+      await saveEmployeesOnly();
     }
 
     window.currentUser = name;
@@ -1017,24 +1025,24 @@ document.getElementById('gateSkipBtn').addEventListener('click', () => {
 });
 
 /* ===== Main UI wiring ===== */
-document.getElementById('addEmployeeBtn')?.addEventListener('click', ()=>{ 
+document.getElementById('addEmployeeBtn')?.addEventListener('click', async ()=>{ 
   if(!window.isAdmin){ alert("Admin access required to add employees."); return; }
   const name=document.getElementById("employeeName").value.trim(); 
   if(name && !employees.includes(name)){ 
     employees.push(name); 
     document.getElementById("employeeName").value=""; 
-    // only save employees list (avoid touching attendanceData)
-    saveEmployeesOnly();
+    // only save employees list (avoid touching attendanceData) - use merge-safe writer
+    await saveEmployeesOnly();
     refreshEmployeeDatalist();
     generateTable(); 
   } 
 });
-document.getElementById('removeEmployeeBtn')?.addEventListener('click', ()=>{ 
+document.getElementById('removeEmployeeBtn')?.addEventListener('click', async ()=>{ 
   if(!window.isAdmin){ alert("Admin access required to remove employees."); return; }
   const name=document.getElementById("employeeName").value.trim();
   employees = employees.filter(e=>e!==name); 
   document.getElementById("employeeName").value=""; 
-  saveEmployeesOnly();
+  await saveEmployeesOnly();
   refreshEmployeeDatalist();
   generateTable(); 
 });
@@ -1894,3 +1902,4 @@ window.removeEmployee = ()=> document.getElementById('removeEmployeeBtn').click(
 </script>
 </body>
 </html>
+
