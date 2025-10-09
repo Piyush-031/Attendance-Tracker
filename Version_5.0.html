@@ -508,7 +508,6 @@ input[type="date"]::-webkit-calendar-picker-indicator {
 .search-card .mini-title { color:#dbeffd; font-weight:700; margin-right:6px; }
 #searchSummary { margin-left:8px; display:flex; align-items:center; gap:8px; flex-wrap:wrap; max-width:calc(100% - 220px); }
 
-/* small selected employees list */
 .selected-list {
   display:flex; gap:8px; flex-wrap:wrap; margin-left:8px; align-items:center;
 }
@@ -552,7 +551,7 @@ input[type="date"]::-webkit-calendar-picker-indicator {
 <!-- RGB Nebula layer -->
 <div class="rgb-nebula" aria-hidden="true"></div>
 
-<header>Data Transformers</header>
+<header>Alter Table Squad</header>
 
 <!-- AUTH OVERLAY (gate) -->
 <div id="authOverlay" role="dialog" aria-modal="true">
@@ -1037,15 +1036,79 @@ document.getElementById('addEmployeeBtn')?.addEventListener('click', async ()=>{
     generateTable(); 
   } 
 });
+
+/* ===== New: delete employee function (removes employee AND attendance keys) ===== */
+async function deleteEmployeeByName(name) {
+  if(!name) return;
+  // update local state first
+  employees = employees.filter(e => e !== name);
+  // remove any attendanceData keys for this employee in local object
+  for(const k of Object.keys(attendanceData)){
+    if(k.startsWith(name + '_')){
+      delete attendanceData[k];
+    }
+  }
+
+  // If firebase ready, remove employee from server and remove attendance keys (set to null)
+  if(dbReady()){
+    try {
+      const { db, ref, child, get, update } = window.firebaseDB;
+      const rootRef = ref(db, 'attendanceApp');
+
+      // load server employees and compute new list
+      const snap = await get(child(rootRef, 'employees'));
+      const serverEmployees = Array.isArray(snap.val()) ? snap.val() : [];
+      const newEmployees = serverEmployees.filter(e => e !== name);
+
+      // prepare attendance updates: set each matching encoded key to null (delete)
+      const attendanceUpdates = {};
+      // caution: server attendance keys are encoded; we must encode local key names too
+      // remove all attendanceApp/attendanceData/<encodedLocalKey>
+      for(const localKey in attendanceData){
+        // already deleted local ones; so nothing remains for this employee in attendanceData.
+      }
+      // but there may be server keys present for this employee that weren't in local attendanceData
+      // To be safe, query server attendanceData and set matching keys to null:
+      const snapAtt = await get(child(rootRef, 'attendanceData'));
+      const serverAttendance = snapAtt.exists() ? snapAtt.val() : {};
+      for(const enc in serverAttendance){
+        try{
+          const decoded = decodeKey(enc);
+          if(decoded.startsWith(name + '_')){
+            attendanceUpdates[`attendanceApp/attendanceData/${enc}`] = null;
+          }
+        }catch(e){}
+      }
+
+      attendanceUpdates['attendanceApp/employees'] = newEmployees;
+
+      await update(ref(db), attendanceUpdates);
+      toast(`Removed employee "${name}" and cleaned attendance data.`);
+    } catch(err){
+      console.error('deleteEmployeeByName error:', err);
+      toast('Failed removing employee from server — see console.');
+    }
+  } else {
+    // not connected to firebase: attempt saving employees only later when ready
+    try { await saveEmployeesOnly(); await saveToFirebase(); } catch(e){ console.warn(e); }
+    toast(`Removed employee "${name}" locally (offline).`);
+  }
+
+  refreshEmployeeDatalist();
+  generateTable();
+}
+
+/* replace previous remove handler to use deleteEmployeeByName */
 document.getElementById('removeEmployeeBtn')?.addEventListener('click', async ()=>{ 
   if(!window.isAdmin){ alert("Admin access required to remove employees."); return; }
   const name=document.getElementById("employeeName").value.trim();
-  employees = employees.filter(e=>e!==name); 
+  if(!name){ toast('Enter employee name to remove'); return; }
+  // confirm removal
+  if(!confirm(`Remove employee "${name}"? This will also remove their attendance entries.`)) return;
   document.getElementById("employeeName").value=""; 
-  await saveEmployeesOnly();
-  refreshEmployeeDatalist();
-  generateTable(); 
+  await deleteEmployeeByName(name);
 });
+
 searchBtn.addEventListener('click', addEmployeeFromSearch);
 document.getElementById('clearSearchBtn').addEventListener('click', clearEmployeeFilter);
 document.getElementById('saveExcelBtn').addEventListener('click', saveToExcel);
@@ -1073,6 +1136,7 @@ function refreshEmployeeDatalist(){
   const dl = document.getElementById("employeeSuggestions");
   if(!dl) return;
   dl.innerHTML = "";
+  // Admin sees all employees in datalist; regular users only see their own name
   const listToShow = window.isAdmin ? employees.slice().sort((a,b)=>a.localeCompare(b)) : (window.currentUser ? [window.currentUser] : []);
   listToShow.forEach(emp=>{
     const opt = document.createElement("option");
@@ -1128,7 +1192,7 @@ function renderSelectedList(){
   });
 }
 
-/* If selection empty -> show all employees (depending on admin/user); else show only selected rows */
+/* If selection empty -> show top N employees (depending on admin/user); else show only selected rows */
 function applySelectionToTable(){
   const table = document.getElementById("attendanceTable");
   if(!table) return;
@@ -1182,8 +1246,9 @@ function highlightDatesForEmployeesStatus(employeeNames, status){
         const cell = tds[d];
         if(cell.classList.contains('weekend')) continue;
         const day = d+1;
-        const key1 = `${emp}_${year}-${monthNum}-${day}`;
-        const val = attendanceData[key1];
+        const key1 = `${emp}_${year}-${monthNum}-${String(day).padStart(2,'0')}`;
+        const key2 = `${emp}_${year}-${monthNum}-${day}`;
+        const val = attendanceData[key1] || attendanceData[key2];
         if(val === status){
           cell.classList.add('date-highlight');
           cell.setAttribute('data-status', status);
@@ -1258,12 +1323,30 @@ function generateTable(){
   else if(window.currentUser) employeesToShow = employees.includes(window.currentUser) ? [window.currentUser] : [window.currentUser];
   else employeesToShow = [];
 
+  // If user/admin didn't select any specific employees, limit table to TOP_N rows to prevent huge tables
+  if(selectedEmployees.length === 0){
+    employeesToShow = employeesToShow.slice(0, TOP_N);
+  } else {
+    // When selection exists, ensure selected employees are shown even if outside TOP_N
+    const selectedSet = new Set(selectedEmployees);
+    const keep = [];
+    // put selected employees first (in selection order), then fill rest from employeesToShow up to TOP_N but include selected beyond TOP_N
+    const added = new Set();
+    selectedEmployees.forEach(s => {
+      if(employees.includes(s) && !added.has(s)) { keep.push(s); added.add(s); }
+    });
+    employeesToShow.forEach(e => { if(!added.has(e) && keep.length < Math.max(TOP_N, selectedEmployees.length)) { keep.push(e); added.add(e); } });
+    // if none of selected existed in main employees list, just use keep fallback
+    employeesToShow = keep.length ? keep : employeesToShow.slice(0, TOP_N);
+  }
+
   employeesToShow.forEach(emp=>{
     let row=`<tr${(window.currentUser && window.currentUser === emp) ? ' class="highlight-row"' : '' }><td>${emp}</td>`;
     for(let d=1; d<=daysInMonth; d++){
       const date=new Date(year, monthNum-1,d);
       const key=`${emp}_${year}-${monthNum}-${d}`;
-      let val=attendanceData[key]||"";
+      const keyPadded=`${emp}_${year}-${monthNum}-${String(d).padStart(2,'0')}`;
+      let val=attendanceData[key]||attendanceData[keyPadded]||"";
       if(date.getDay()===0||date.getDay()===6){
         row+=`<td class="weekend">Week Off</td>`;
       } else if(date < today){
@@ -1272,7 +1355,7 @@ function generateTable(){
         const canEdit = (window.isAdmin === true) || (window.currentUser && window.currentUser === emp);
         if(canEdit){
           row+=`<td style="background:${colors[val]||'transparent'}">
-            <select onchange="updateData('${key}', this.value)">
+            <select onchange="updateData('${emp}_${year}-${monthNum}-${d}', this.value)">
               <option value="">Select</option>
               <option value="WFO" ${val==="WFO"?"selected":""}>WFO</option>
               <option value="WFH" ${val==="WFH"?"selected":""}>WFH</option>
@@ -1789,7 +1872,8 @@ function updateSearchSummaryForSelection(){
   selectedEmployees.forEach(emp => {
     for(let d=1; d<=daysInMonth; d++){
       const key = `${emp}_${year}-${monthNum}-${d}`;
-      const val = attendanceData[key];
+      const keyP = `${emp}_${year}-${monthNum}-${String(d).padStart(2,'0')}`;
+      const val = attendanceData[key] || attendanceData[keyP];
       if(counts.hasOwnProperty(val)){
         counts[val]++;
         groupedDates[val][emp] = groupedDates[val][emp] || [];
@@ -1855,7 +1939,8 @@ function filterRowsByStatus(status){
     let hasStatus = false;
     for(let d=1; d<=daysInMonth; d++){
       const key1 = `${emp}_${year}-${monthNum}-${d}`;
-      const val = attendanceData[key1];
+      const key2 = `${emp}_${year}-${monthNum}-${String(d).padStart(2,'0')}`;
+      const val = attendanceData[key1] || attendanceData[key2];
       if(val === status){ hasStatus = true; break; }
     }
     tr.style.display = hasStatus ? "" : "none";
