@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8" />
-<title>Attendance Tracker (Patched: Remove + Vertical Top-N Scroll)</title>
+<title>Attendance Tracker (Full — Remove + Top10 + Both Scrollbars)</title>
 <script src="https://cdn.jsdelivr.net/npm/xlsx/dist/xlsx.full.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&display=swap" rel="stylesheet">
@@ -131,7 +131,7 @@ header {
   100% { background-position: 300% 50%; }
 }
 
-/* Glass Topbar styles */
+/* Glass Topbar styles (replaced previous topbar) */
 .topbar {
   position: fixed;
   left: 12px;
@@ -150,8 +150,11 @@ header {
   border: 1px solid rgba(255,255,255,0.06);
   box-shadow: 0 10px 30px rgba(8,12,20,0.55), 0 1px 0 rgba(255,255,255,0.02) inset;
 }
+
+/* allow children to accept clicks while topbar container ignores pointer events */
 .topbar > * { pointer-events: auto; }
 
+ /* Live IST clock (pinned left) */
 .clock {
   color: #f1f1f1;
   font-weight: 600;
@@ -166,6 +169,7 @@ header {
   margin-right: 6px;
 }
 
+/* User panel pinned to right (via spacer in HTML) */
 .user-panel {
   display:flex;
   gap:10px;
@@ -302,53 +306,33 @@ button:hover {
   box-shadow: 0 0 12px var(--neon-blue), 0 0 18px var(--neon-teal);
 }
 
-/* Table */
-.table-wrapper { overflow-x: auto; max-width: 100%; isolation: isolate; } 
-/* container handles vertical scrolling; JS sets max-height to show TOP_N rows */
-.table-container { display: block; overflow-y: auto; } 
-.table-container::-webkit-scrollbar { height: 10px; width: 8px; }
-.card.table-card,
-.card.table-card:hover {
-  background: #141414;  
-  backdrop-filter: none;
-  -webkit-backdrop-filter: none;
-  box-shadow:
-    inset 0 1px 0 rgba(255,255,255,.06),
-    0 14px 28px rgba(0,0,0,.35);
-  padding: 16px;
+/* Table: outer wrapper handles horizontal scroll, inner container vertical */
+/* Outer wrapper shows horizontal scrollbar when table is wider than viewport */
+.table-wrapper {
+  width: 100%;
+  overflow-x: auto;  /* horizontal scroll */
+  overflow-y: visible; /* vertical handled by inner container */
+  -webkit-overflow-scrolling: touch;
 }
 
-table {
-  border-collapse: collapse;
-  min-width: 800px;
-  background: rgba(0,0,0,0.65);
-  color: #f1f1f1;
-  width:100%;
+/* Inner container is the vertical scroller and keeps header sticky (th { position: sticky; top: 0 }) */
+.table-container {
+  display: block;
+  overflow-y: auto; /* vertical scroll */
+  overflow-x: visible; /* horizontal scroll provided by wrapper */
+  width: max-content; /* ensure it wraps the wide table so outer wrapper shows horizontal scrollbar */
+  max-width: 100%;
+  border-radius: 12px;
 }
 
-th, td {
-  border:1px solid rgba(255,255,255,0.2);
-  padding:10px;
-  text-align:center;
-  white-space:nowrap;
-}
-th {
-  background: rgba(20,20,20,0.95);
-  position: sticky;
-  top: 0;
-  z-index: 3;
-}
+/* small scrollbar styling */
+.table-container::-webkit-scrollbar, .table-wrapper::-webkit-scrollbar { height: 10px; width: 10px; }
 
-td:first-child,
-th:first-child{
-  position: sticky;
-  left: 0;
-  background: #141414;     
-  z-index: 10;
-  transform: translateZ(0);
-  will-change: transform;
-  box-shadow: 6px 0 8px rgba(0,0,0,0.35); 
-}
+/* table layout */
+table { border-collapse: collapse; min-width: 800px; background: rgba(0,0,0,0.65); color: #f1f1f1; width:100%; }
+th, td { border:1px solid rgba(255,255,255,0.2); padding:10px; text-align:center; white-space:nowrap; }
+th { background: rgba(20,20,20,0.95); position: sticky; top: 0; z-index: 3; }
+td:first-child, th:first-child{ position: sticky; left: 0; background: #141414; z-index: 10; transform: translateZ(0); will-change: transform; box-shadow: 6px 0 8px rgba(0,0,0,0.35); }
 th:first-child{ z-index: 11; }
 
 table tr:hover td:not(.weekend):not(:first-child) {
@@ -360,6 +344,7 @@ table tr:hover td:not(.weekend):not(:first-child) {
 table tr:nth-child(even) td { background: rgba(255,255,255,0.05); }
 .weekend { background: rgba(50,50,50,0.5); color:#bbb; pointer-events:none; }
 
+/* NEW: very noticeable highlight for selected date cells */
 @keyframes pulseGlow {
   0% { box-shadow: 0 10px 30px rgba(255,255,255,0.06), 0 0 0 rgba(0,0,0,0); transform: translateY(0); }
   50% { box-shadow: 0 18px 40px rgba(255,255,255,0.09), 0 0 18px rgba(255,255,255,0.06); transform: translateY(-2px); }
@@ -374,13 +359,15 @@ table tr:nth-child(even) td { background: rgba(255,255,255,0.05); }
   transform-origin: center;
   transition: transform .12s, box-shadow .12s;
 }
+
+/* when a date cell is highlighted, slightly darken its background for contrast */
 .date-highlight[data-status="WFO"] { background: rgba(46,204,113,0.18); }
 .date-highlight[data-status="WFH"] { background: rgba(52,152,219,0.14); }
 .date-highlight[data-status="Leave"] { background: rgba(231,76,60,0.14); }
 .date-highlight[data-status="Holiday"] { background: rgba(241,196,15,0.14); }
 
 /* charts and rest (kept minimal here) */
-.chart-container { flex:1; height:380px; border-radius:18px; padding:20px; background: rgba(20,20,20,0.55); }
+.chart-container { flex:1; height:380px; border-radius:18px; padding:20px; background: rgba(20,20,20,0.55); display:flex; flex-direction: column; box-shadow: 0 12px 28px rgba(0,0,0,.42), 0 0 24px rgba(9,132,227,.16) inset; backdrop-filter: blur(12px); border:1px solid rgba(255,255,255,0.15); overflow:hidden; }
 .top-reserved { height: 10px; width: 100%; pointer-events: none; }
 .capsule-badges { display:flex; gap:12px; margin-top:10px; flex-wrap:wrap; align-items:center; }
 .capsule-badges .badge { padding:8px 14px; border-radius:999px; font-weight:700; color:#111; box-shadow: 0 6px 18px rgba(0,0,0,0.38); min-width:88px; text-align:center; display:inline-block; cursor:pointer; user-select:none; transition: transform .12s, box-shadow .12s; }
@@ -397,13 +384,15 @@ table tr:nth-child(even) td { background: rgba(255,255,255,0.05); }
 </head>
 <body>
 
-<!-- Top spacer -->
+<!-- Top reserved bar (added) -->
 <div class="top-reserved" aria-hidden="true"></div>
 
-<!-- Topbar -->
+<!-- Topbar: clock (left) + spacer + user panel (right) -->
 <div class="topbar" aria-hidden="false">
   <div id="clock" class="clock">--:--:-- -- | -- --- ----</div>
-  <div style="flex:1"></div>
+
+  <div style="flex:1"></div> <!-- spacer pushes user panel to the far right -->
+
   <div class="user-panel" id="topUserPanel" aria-hidden="false">
     <div class="user-badge" id="userStatusDisplay">Not logged</div>
     <div class="user-actions" id="topUserActions">
@@ -414,45 +403,54 @@ table tr:nth-child(even) td { background: rgba(255,255,255,0.05); }
   </div>
 </div>
 
+<!-- Twinkling stars & particle network -->
 <canvas id="stars-bg"></canvas>
 <canvas id="particles-bg"></canvas>
+
+<!-- RGB Nebula layer -->
 <div class="rgb-nebula" aria-hidden="true"></div>
 
 <header>Alter Table Squad</header>
 
-<!-- AUTH OVERLAY -->
-<div id="authOverlay" role="dialog" aria-modal="true">
-  <div class="authBox" style="width:920px; max-width:98%; display:grid; grid-template-columns:1fr 1fr; gap:16px; background:rgba(20,20,20,0.95); border-radius:12px; padding:18px;">
+<!-- AUTH OVERLAY (gate) -->
+<div id="authOverlay" role="dialog" aria-modal="true" style="position:fixed; inset:0; display:flex; align-items:center; justify-content:center; z-index:9999;">
+  <div class="authBox" style="width: 920px; max-width:98%; display:grid; grid-template-columns: 1fr 1fr; gap: 16px; background: rgba(20,20,20,0.95); border-radius:12px; padding:18px; color:#f1f1f1; box-shadow:0 14px 40px rgba(0,0,0,0.6);">
     <div class="authLeft authRow">
-      <h3 style="margin:0 0 8px 0; color:var(--neon-blue)">User Login / Register</h3>
+      <h3>User Login / Register</h3>
       <label for="gateUserName">Name</label>
       <input id="gateUserName" type="text" placeholder="e.g. Ravi Kumar" autocomplete="off">
+
       <label for="gateUserPwd">Password</label>
       <input id="gateUserPwd" type="password" placeholder="Choose / enter password">
+
       <div style="display:flex; gap:10px; margin-top:8px;">
         <button id="gateRegisterBtn">Register</button>
         <button id="gateUserLoginBtn">Login</button>
       </div>
-      <div class="authHint" style="font-size:13px; color:#9aa8bf; margin-top:8px;">Register will create your user account and add you to employees so your row appears.</div>
+
+      <div class="authHint">Register will create your user account and add you to employees so your row appears.</div>
     </div>
 
     <div class="authRight authRow">
-      <h3 style="margin:0 0 8px 0; color:var(--neon-blue)">Admin Login</h3>
+      <h3>Admin Login</h3>
       <label for="gateAdminPwd">Admin password</label>
       <input id="gateAdminPwd" type="password" placeholder="Admin password">
+
       <div style="display:flex; gap:10px; margin-top:8px;">
         <button id="gateAdminLoginBtn">Admin Login</button>
         <button id="gateSkipBtn" title="Restore session if stored">Restore session / Cancel</button>
       </div>
-      <div class="authHint" style="font-size:13px; color:#9aa8bf; margin-top:8px;">If you've logged in previously, press Restore session; otherwise login/register.</div>
+
+      <div class="authHint">If you've logged in previously, press Restore session; otherwise login/register.</div>
     </div>
   </div>
 </div>
 
 <div id="mainPage" class="locked">
+
   <div class="container">
 
-    <!-- Admin controls -->
+    <!-- Admin: Employee Management -->
     <div class="card" id="adminCard" style="display:none">
       <div class="section-title">Employee Management</div>
       <div id="employeeList">
@@ -462,18 +460,22 @@ table tr:nth-child(even) td { background: rgba(255,255,255,0.05); }
       </div>
     </div>
 
-    <!-- TABLE -->
+    <!-- TABLE CARD -- visible to users and admin -->
     <div class="card table-card">
       <div class="section-title">Attendance Table</div>
 
-      <div class="search-card" style="display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-bottom:12px;">
-        <span class="mini-title" style="color:#dbeffd; font-weight:700; margin-right:6px;">Search Employee Presence:</span>
+      <div class="search-card">
+        <span class="mini-title">Search Employee Presence:</span>
         <input type="text" id="employeeSearch" list="employeeSuggestions" placeholder="Type employee name..." />
         <datalist id="employeeSuggestions"></datalist>
         <button id="searchBtn">Add</button>
         <button id="clearSearchBtn">Clear</button>
+
+        <!-- selected employees pills -->
         <div class="selected-list" id="selectedList" aria-live="polite"></div>
-        <div id="searchSummary" style="margin-left:8px; display:flex; align-items:center; gap:8px; flex-wrap:wrap;"></div>
+
+        <!-- badges will be rendered here (under search) -->
+        <div id="searchSummary"></div>
       </div>
 
       <label for="monthPicker">Select Month for Table: </label>
@@ -485,7 +487,7 @@ table tr:nth-child(even) td { background: rgba(255,255,255,0.05); }
       </div>
     </div>
 
-    <!-- Bulk -->
+    <!-- Admin: Bulk Update (admin-only) -->
     <div class="card" id="bulkCard" style="display:none">
       <div class="section-title">Bulk Update Attendance</div>
       <label>Status: </label>
@@ -502,7 +504,7 @@ table tr:nth-child(even) td { background: rgba(255,255,255,0.05); }
       <button id="bulkApplyBtn">Apply</button>
     </div>
 
-    <!-- Save / Upload -->
+    <!-- Admin: Save / Upload Data -->
     <div class="card" id="saveUploadCard" style="display:none">
       <div class="section-title">Save / Upload Data</div>
       <button id="saveExcelBtn">SAVE FILE</button>
@@ -510,11 +512,12 @@ table tr:nth-child(even) td { background: rgba(255,255,255,0.05); }
       <input type="file" id="fileInput" accept=".xlsx" style="display:none">
     </div>
 
-    <!-- Visualizations -->
+    <!-- Visualizations (now single combined chart; visible to all users) -->
     <div class="card" id="vizCard" style="display:none">
       <div class="section-title">Visualizations</div>
+
       <div class="view-toggle" role="group" aria-label="Daily or Monthly view toggle">
-        <div class="pill" id="vizPill" style="display:inline-flex; gap:8px; align-items:center; margin-bottom:12px;">
+        <div class="pill" id="vizPill">
           <button id="vizDailyBtn" type="button">Daily</button>
           <button id="vizMonthlyBtn" class="active" type="button">Monthly</button>
         </div>
@@ -528,7 +531,7 @@ table tr:nth-child(even) td { background: rgba(255,255,255,0.05); }
       <div class="charts" style="margin-top:15px;">
         <div class="chart-container">
           <div class="chart-title" id="combinedChartTitle">Monthly Summary</div>
-          <div id="chartScroller" style="width:100%; overflow-x:auto;">
+          <div id="chartScroller">
             <canvas id="combinedChart"></canvas>
           </div>
         </div>
@@ -543,11 +546,15 @@ table tr:nth-child(even) td { background: rgba(255,255,255,0.05); }
 const SESSION_USER_KEY = 'attendance_current_user';
 const SESSION_ADMIN_KEY = 'attendance_is_admin';
 
-let employees = [], attendanceData = {}, barChart=null;
+let employees = [], attendanceData = {}, barChart=null; // single chart now
+/* color map */
 const colors = {"WFO":"#2ecc71","WFH":"#3498db","Leave":"#e74c3c","Holiday":"#f1c40f"};
+
+/* selection state: multiple employees */
 let selectedEmployees = [];
-let firebaseSynced = false;
-const TOP_N = 10; // number of rows visible in viewport (adjustable)
+
+let firebaseSynced = false; // <- guard: we received initial server snapshot
+const TOP_N = 10; // show first N employees by default; rest vertically scrollable
 
 function encodeKey(key){ return encodeURIComponent(key); }
 function decodeKey(enc){ try{ return decodeURIComponent(enc); } catch(e){ return enc; } }
@@ -610,24 +617,24 @@ function updateSessionUI(){
     adminLoginMainBtn.style.display = 'none';
     adminLogoutMainBtn.style.display = '';
     if(adminCardEl) adminCardEl.style.display = 'block';
-    if(saveUploadCardEl) saveUploadCardEl.style.display = '';
+    if(saveUploadCardEl) saveUploadCardEl.style.display = '';           // show save/upload
     if(bulkCardEl) bulkCardEl.style.display = 'block';
   } else {
     adminLoginMainBtn.style.display = '';
     adminLogoutMainBtn.style.display = 'none';
     if(adminCardEl) adminCardEl.style.display = 'none';
-    if(saveUploadCardEl) saveUploadCardEl.style.display = 'none';
+    if(saveUploadCardEl) saveUploadCardEl.style.display = 'none';       // hide save/upload
     if(bulkCardEl) bulkCardEl.style.display = 'none';
   }
 
-  // Visualization visible to all
+  // Visualization is visible to everyone (users and admin)
   if(vizCardEl) vizCardEl.style.display = 'block';
 }
 
 /* little alert */
 function toast(msg){ alert(msg); }
 
-/* ===== IST Clock ===== */
+/* ===== IST Clock (robust) ===== */
 (function istClock(){
   const el = document.getElementById('clock');
   function tick(){
@@ -668,6 +675,7 @@ function toast(msg){ alert(msg); }
           }
           employees = val.employees || [];
         }
+        // mark that we've received the initial server snapshot
         firebaseSynced = true;
         refreshEmployeeDatalist();
         if(overlay.style.display === 'none') generateTable();
@@ -721,7 +729,7 @@ async function saveToFirebase(){
   }
 }
 
-/* Save only employees (merge-safe) */
+/* Save only employees (used while registering/removing to avoid touching attendanceData) - MERGE SAFE */
 async function saveEmployeesOnly(){
   if(!dbReady()){ console.warn('firebase not ready'); return; }
   const { db, ref, child, get, update } = window.firebaseDB;
@@ -737,7 +745,7 @@ async function saveEmployeesOnly(){
   }
 }
 
-/* Single-field update with guard */
+/* ===== Single update with guard ===== */
 function updateData(key, val){
   const namePart = key.split('_')[0];
   const current = window.currentUser || null;
@@ -809,6 +817,7 @@ async function registerUserOverlay(){
     // add employee only to employees list (avoid touching attendanceData)
     if(!employees.includes(name)){
       employees.push(name);
+      // NEW: use merge-safe employees write
       await saveEmployeesOnly();
     }
 
@@ -881,6 +890,7 @@ document.getElementById('addEmployeeBtn')?.addEventListener('click', async ()=>{
   if(name && !employees.includes(name)){ 
     employees.push(name); 
     document.getElementById("employeeName").value=""; 
+    // only save employees list (avoid touching attendanceData) - use merge-safe writer
     await saveEmployeesOnly();
     refreshEmployeeDatalist();
     generateTable(); 
@@ -972,7 +982,7 @@ userLogoutBtn.addEventListener('click', ()=> {
   toast('User logged out.');
 });
 
-/* ===== Datalist & Search ===== */
+/* ===== Datalist & Search (user-limited visibility) ===== */
 function refreshEmployeeDatalist(){
   const dl = document.getElementById("employeeSuggestions");
   if(!dl) return;
@@ -985,6 +995,7 @@ function refreshEmployeeDatalist(){
   });
 }
 
+/* Add employee to current selection (multiple select behavior) */
 function addEmployeeFromSearch(){
   const input = document.getElementById("employeeSearch");
   const nameRaw = (input.value || '').trim();
@@ -1012,6 +1023,7 @@ function addEmployeeFromSearch(){
   }
 }
 
+/* render the selected employees pills */
 function renderSelectedList(){
   selectedListEl.innerHTML = '';
   selectedEmployees.forEach(emp => {
@@ -1030,6 +1042,7 @@ function renderSelectedList(){
   });
 }
 
+/* If selection empty -> show all employees (depending on admin/user); else show only selected rows */
 function applySelectionToTable(){
   const table = document.getElementById("attendanceTable");
   if(!table) return;
@@ -1050,6 +1063,7 @@ function applySelectionToTable(){
   });
 }
 
+/* Clear selection and restore search input and table */
 function clearEmployeeFilter(){
   document.getElementById('employeeSearch').value = '';
   selectedEmployees = [];
@@ -1066,6 +1080,7 @@ function highlightDatesForEmployeesStatus(employeeNames, status){
   const table = document.getElementById('attendanceTable');
   if(!table) return;
   let firstHighlightedCell = null;
+  const ths = Array.from(document.querySelectorAll('#attendanceTable th'));
 
   for(const emp of employeeNames){
     const rows = Array.from(table.querySelectorAll('tr'));
@@ -1122,7 +1137,7 @@ function clearDateHighlights(){
   });
 }
 
-/* ===== Table generation (renders full list; tableContainer viewport set to TOP_N rows) ===== */
+/* ===== Table generation (user-limited visibility + auto-scroll) ===== */
 let lastStatusFilter = null;
 function scrollToTableColumn(table, colIndex){
   try{
@@ -1159,7 +1174,6 @@ function generateTable(){
   else if(window.currentUser) employeesToShow = employees.includes(window.currentUser) ? [window.currentUser] : [window.currentUser];
   else employeesToShow = [];
 
-  // Render full list for vertical scrolling UX (viewport controlled separately)
   employeesToShow.forEach(emp=>{
     let row=`<tr${(window.currentUser && window.currentUser === emp) ? ' class="highlight-row"' : '' }><td>${emp}</td>`;
     for(let d=1; d<=daysInMonth; d++){
@@ -1174,8 +1188,11 @@ function generateTable(){
       } else {
         const canEdit = (window.isAdmin === true) || (window.currentUser && window.currentUser === emp);
         if(canEdit){
+          const inlineKey = `${emp}_${year}-${monthNum}-${String(d).padStart(2,'0')}`;
+          // escape single quotes in inlineKey/emp to avoid breaking attribute (basic)
+          const safeKey = inlineKey.replace(/'/g, "\\'");
           row+=`<td style="background:${colors[val]||'transparent'}">
-            <select onchange="updateData('${emp}_${year}-${monthNum}-${String(d).padStart(2,'0')}', this.value)">
+            <select onchange="updateData('${safeKey}', this.value)">
               <option value="">Select</option>
               <option value="WFO" ${val==="WFO"?"selected":""}>WFO</option>
               <option value="WFH" ${val==="WFH"?"selected":""}>WFH</option>
@@ -1202,10 +1219,12 @@ function generateTable(){
     if(tableContainer){
       tableContainer.style.maxHeight = desired + 'px';
       tableContainer.style.overflowY = 'auto';
+      // ensure .table-container width encompasses table so .table-wrapper shows horizontal scroll if needed
+      const tbl = document.getElementById('attendanceTable');
+      tableContainer.style.width = (tbl.offsetWidth || tbl.scrollWidth) + 'px';
     }
   } catch(e){ console.warn('Could not set vertical scroll height for tableContainer', e); }
 
-  // Auto-scroll to today's column (existing behavior)
   try {
     const monthVal = document.getElementById("monthPicker").value;
     if(monthVal){
@@ -1242,7 +1261,7 @@ function generateTable(){
   if(lastStatusFilter) filterRowsByStatus(lastStatusFilter);
 }
 
-/* ===== Bulk update / Excel / load (admin only) ===== */
+/* ===== Bulk update / Excel / load (with admin guards) ===== */
 function applyBulkUpdate(){
   if(!window.isAdmin){ alert("Bulk update requires admin access."); return; }
   const status = document.getElementById("bulkStatus").value;
@@ -1323,7 +1342,7 @@ function loadFromExcel(event){
   reader.readAsArrayBuffer(file);
 }
 
-/* ===== Chart plugin & chart functions ===== */
+/* ===== Chart plugin ===== */
 const DepthBars = {
   id: 'depthBars',
   afterDatasetsDraw(chart){
@@ -1463,7 +1482,7 @@ Chart.register(DepthBars);
   resize(); requestAnimationFrame(step);
 })();
 
-/* ===== Visualization toggle wiring (default Monthly) ===== */
+/* ===== Visualization toggle wiring (default Monthly/current month) ===== */
 (function(){
   const dailyBtn = document.getElementById('vizDailyBtn');
   const monthlyBtn = document.getElementById('vizMonthlyBtn');
@@ -1490,11 +1509,12 @@ Chart.register(DepthBars);
   if(dailyBtn && monthlyBtn){
     dailyBtn.addEventListener('click', setDaily);
     monthlyBtn.addEventListener('click', setMonthly);
+    // DEFAULT: Monthly (current month)
     setMonthly();
   }
 })();
 
-/* ===== Chart helpers + updateCharts() ===== */
+/* ===== Chart helpers + combined updateCharts() ===== */
 function createGradient(ctx, color){
   const gradient = ctx.createLinearGradient(0,0,0,350);
   gradient.addColorStop(0, lightenColor(color,0.3));
@@ -1515,6 +1535,7 @@ function updateCharts(){
   const monthlyPicker = document.getElementById('monthlyPicker');
   const dayPicker = document.getElementById('dayPicker');
 
+  // Default to current month for monthly view
   if(monthlyToggleVisible){
     if(!monthlyPicker.value){
       const monthInput = document.getElementById('monthPicker');
@@ -1537,6 +1558,7 @@ function updateCharts(){
     const [year, monthNum] = monthlyPicker.value.split("-");
     const monthSummary = {};
 
+    // Alphabetical order
     const empsSorted = employees.slice().sort((a,b)=>a.localeCompare(b));
     const days = new Date(year, monthNum, 0).getDate();
     empsSorted.forEach(emp=>{
@@ -1556,6 +1578,7 @@ function updateCharts(){
     const statuses = ["WFO","WFH","Leave","Holiday"];
     const labels = empsSorted;
 
+    // Dynamic canvas width for scroll: 80px per employee (show at least TOP_N)
     const canvas = document.getElementById("combinedChart");
     const pxPerEmp = 80;
     const baseWidth = Math.max(TOP_N * pxPerEmp, Math.max(1, labels.length) * pxPerEmp);
@@ -1609,6 +1632,7 @@ function updateCharts(){
     if(barChart) barChart.destroy();
     barChart = new Chart(ctx, { type: "bar", data: { labels, datasets }, options });
 
+    // Scroll so first TOP_N are visible by default
     const scroller = document.getElementById('chartScroller');
     scroller.scrollLeft = 0;
 
@@ -1637,7 +1661,7 @@ function updateCharts(){
       const k2 = `${emp}_${y}-${m}-${dUnpadded}`;
       const val = attendanceData[k1] || attendanceData[k2];
       if(colors[val]){
-        summary[val]=(summary[val]||0)+1;
+        summary[val] = (summary[val] || 0) + 1;
         employeeNames[val] = employeeNames[val] || [];
         employeeNames[val].push(emp);
       }
@@ -1754,7 +1778,7 @@ function updateSearchSummaryForSelection(){
   });
 }
 
-/* Filter rows by status */
+/* Filter rows by status (kept for potential use) */
 function filterRowsByStatus(status){
   const monthVal = document.getElementById("monthPicker").value;
   if(!monthVal) return;
@@ -1817,3 +1841,4 @@ window.removeEmployee = ()=> document.getElementById('removeEmployeeBtn').click(
 </script>
 </body>
 </html>
+
