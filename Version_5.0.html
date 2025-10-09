@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8" />
-<title>Attendance Tracker (Patched)</title>
+<title>Attendance Tracker (Patched: Remove + Vertical Top-N Scroll)</title>
 <script src="https://cdn.jsdelivr.net/npm/xlsx/dist/xlsx.full.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&display=swap" rel="stylesheet">
@@ -131,7 +131,7 @@ header {
   100% { background-position: 300% 50%; }
 }
 
-/* Glass Topbar styles (replaced previous topbar) */
+/* Glass Topbar styles */
 .topbar {
   position: fixed;
   left: 12px;
@@ -150,11 +150,8 @@ header {
   border: 1px solid rgba(255,255,255,0.06);
   box-shadow: 0 10px 30px rgba(8,12,20,0.55), 0 1px 0 rgba(255,255,255,0.02) inset;
 }
-
-/* allow children to accept clicks while topbar container ignores pointer events */
 .topbar > * { pointer-events: auto; }
 
- /* Live IST clock (pinned left) */
 .clock {
   color: #f1f1f1;
   font-weight: 600;
@@ -169,7 +166,6 @@ header {
   margin-right: 6px;
 }
 
-/* User panel pinned to right (via spacer in HTML) */
 .user-panel {
   display:flex;
   gap:10px;
@@ -308,8 +304,9 @@ button:hover {
 
 /* Table */
 .table-wrapper { overflow-x: auto; max-width: 100%; isolation: isolate; } 
-.table-container { display: inline-block; }
-
+/* container handles vertical scrolling; JS sets max-height to show TOP_N rows */
+.table-container { display: block; overflow-y: auto; } 
+.table-container::-webkit-scrollbar { height: 10px; width: 8px; }
 .card.table-card,
 .card.table-card:hover {
   background: #141414;  
@@ -318,6 +315,7 @@ button:hover {
   box-shadow:
     inset 0 1px 0 rgba(255,255,255,.06),
     0 14px 28px rgba(0,0,0,.35);
+  padding: 16px;
 }
 
 table {
@@ -325,6 +323,7 @@ table {
   min-width: 800px;
   background: rgba(0,0,0,0.65);
   color: #f1f1f1;
+  width:100%;
 }
 
 th, td {
@@ -361,7 +360,6 @@ table tr:hover td:not(.weekend):not(:first-child) {
 table tr:nth-child(even) td { background: rgba(255,255,255,0.05); }
 .weekend { background: rgba(50,50,50,0.5); color:#bbb; pointer-events:none; }
 
-/* NEW: very noticeable highlight for selected date cells */
 @keyframes pulseGlow {
   0% { box-shadow: 0 10px 30px rgba(255,255,255,0.06), 0 0 0 rgba(0,0,0,0); transform: translateY(0); }
   50% { box-shadow: 0 18px 40px rgba(255,255,255,0.09), 0 0 18px rgba(255,255,255,0.06); transform: translateY(-2px); }
@@ -376,164 +374,36 @@ table tr:nth-child(even) td { background: rgba(255,255,255,0.05); }
   transform-origin: center;
   transition: transform .12s, box-shadow .12s;
 }
-
-/* when a date cell is highlighted, slightly darken its background for contrast */
 .date-highlight[data-status="WFO"] { background: rgba(46,204,113,0.18); }
 .date-highlight[data-status="WFH"] { background: rgba(52,152,219,0.14); }
 .date-highlight[data-status="Leave"] { background: rgba(231,76,60,0.14); }
 .date-highlight[data-status="Holiday"] { background: rgba(241,196,15,0.14); }
 
-.charts { display: flex; justify-content: space-between; gap: 20px; flex-wrap: nowrap; }
-.chart-container { 
-  flex:1; height:380px; border-radius:18px; padding:20px; 
-  background: rgba(20,20,20,0.55); 
-  display:flex; flex-direction: column; 
-  box-shadow:
-    0 12px 28px rgba(0,0,0,.42),
-    0 0 24px rgba(9,132,227,.16) inset;
-  backdrop-filter: blur(12px);
-  border: 1px solid rgba(255,255,255,0.15);
-  overflow: hidden; /* keep original feel */
-}
-.chart-title { text-align:center; font-weight:700; font-size:1.4em; margin-bottom:12px; color:#f1f1f1; }
-
-input[type="month"]::-webkit-calendar-picker-indicator,
-input[type="date"]::-webkit-calendar-picker-indicator {
-  filter: invert(1);
-  cursor: pointer;
-}
-
-/* Overlay (login gate) */
-#authOverlay {
-  position: fixed;
-  inset: 0;
-  z-index: 9999;
-  display:flex;
-  align-items:center;
-  justify-content:center;
-  background: linear-gradient(180deg, rgba(2,6,20,0.96), rgba(4,8,16,0.96));
-  padding: 18px;
-}
-.authBox {
-  width: 920px; max-width: 98%; display: grid; grid-template-columns: 1fr 1fr; gap: 16px;
-  background: rgba(20,20,20,0.95); border-radius:12px; padding:18px; color:#f1f1f1;
-  box-shadow: 0 14px 40px rgba(0,0,0,0.6);
-  border: 1px solid rgba(255,255,255,0.04);
-  position: relative;
-  overflow: visible;
-}
-.authBox::before {
-  content: "";
-  position: absolute;
-  inset: 0;
-  border-radius: 12px;
-  padding: 2px;
-  background: linear-gradient(135deg, #0984e3, #6c5ce7, #00b894);
-  -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
-  -webkit-mask-composite: xor;
-          mask-composite: exclude;
-  pointer-events: none;
-  box-shadow:
-    0 0 18px rgba(9,132,227,.28),
-    0 0 26px rgba(0,184,148,.18);
-}
-.authBox h3 { margin: 0 0 8px 0; color: var(--neon-blue); }
-.authRow { display:flex; flex-direction:column; gap:8px; }
-.authHint { font-size:13px; color:#9aa8bf; margin-top:8px; }
-
-.highlight-row { box-shadow: inset 0 0 0 2px rgba(9,132,227,0.6); }
-
-.locked { filter: blur(2px) grayscale(.04); pointer-events: none; user-select: none; opacity: .98 }
+/* charts and rest (kept minimal here) */
+.chart-container { flex:1; height:380px; border-radius:18px; padding:20px; background: rgba(20,20,20,0.55); }
+.top-reserved { height: 10px; width: 100%; pointer-events: none; }
+.capsule-badges { display:flex; gap:12px; margin-top:10px; flex-wrap:wrap; align-items:center; }
+.capsule-badges .badge { padding:8px 14px; border-radius:999px; font-weight:700; color:#111; box-shadow: 0 6px 18px rgba(0,0,0,0.38); min-width:88px; text-align:center; display:inline-block; cursor:pointer; user-select:none; transition: transform .12s, box-shadow .12s; }
+.capsule-badges .badge:hover { transform: translateY(-3px); box-shadow: 0 10px 26px rgba(0,0,0,0.45); }
+.selected-list { display:flex; gap:8px; flex-wrap:wrap; margin-left:8px; align-items:center; }
+.selected-list .sel { padding:6px 10px; border-radius:999px; background:rgba(255,255,255,0.04); color:#dbeffd; font-weight:700; cursor:default; }
 
 @media (max-width: 760px){
   .topbar { padding: 0 10px; }
   .clock { font-size:0.8rem; padding:6px 8px; }
   .user-badge { font-size:0.85rem; padding:4px 8px; }
 }
-
-/* Small view toggle style inside Visualizations to match theme */
-.view-toggle {
-  display:inline-flex; gap:8px; align-items:center; margin-bottom:12px;
-}
-.view-toggle .pill {
-  background: rgba(255,255,255,0.03);
-  border-radius: 999px;
-  padding: 6px;
-  display: inline-flex;
-}
-.view-toggle .pill button {
-  background: transparent; border: none; color: #d6eefc; padding: 8px 12px; border-radius:999px; cursor:pointer; font-weight:700;
-}
-.view-toggle .pill button.active {
-  background: linear-gradient(90deg,#0984e3,#6c5ce7);
-  box-shadow: 0 8px 18px rgba(9,132,227,0.12);
-}
-
-/* --- TOP reserved bar spacer (added) --- */
-.top-reserved {
-  height: 10px;
-  width: 100%;
-  pointer-events: none;
-}
-
-/* ===== Capsule badges for search summary (below search bar) ===== */
-.capsule-badges {
-  display:flex;
-  gap:12px;
-  margin-top:10px;
-  flex-wrap:wrap;
-  align-items:center;
-}
-.capsule-badges .badge {
-  padding:8px 14px;
-  border-radius:999px;
-  font-weight:700;
-  color:#111;
-  box-shadow: 0 6px 18px rgba(0,0,0,0.38);
-  min-width:88px;
-  text-align:center;
-  display:inline-block;
-  cursor:pointer;
-  user-select:none;
-  transition: transform .12s, box-shadow .12s;
-}
-.capsule-badges .badge:hover { transform: translateY(-3px); box-shadow: 0 10px 26px rgba(0,0,0,0.45); }
-.capsule-badges .badge.active {
-  outline: 3px solid rgba(255,255,255,0.08);
-  transform: scale(1.03);
-}
-
-/* Make sure Attendance table's search summary area doesn't break layout */
-.search-card { display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-bottom:12px; }
-.search-card .mini-title { color:#dbeffd; font-weight:700; margin-right:6px; }
-#searchSummary { margin-left:8px; display:flex; align-items:center; gap:8px; flex-wrap:wrap; max-width:calc(100% - 220px); }
-
-.selected-list {
-  display:flex; gap:8px; flex-wrap:wrap; margin-left:8px; align-items:center;
-}
-.selected-list .sel {
-  padding:6px 10px; border-radius:999px; background:rgba(255,255,255,0.04); color:#dbeffd; font-weight:700; cursor:default;
-}
-
-/* === Horizontal scroller for combined chart === */
-#chartScroller { 
-  width: 100%;
-  overflow-x: auto;
-  overflow-y: hidden;
-}
 </style>
 </head>
 <body>
 
-<!-- Top reserved bar (added) -->
+<!-- Top spacer -->
 <div class="top-reserved" aria-hidden="true"></div>
 
-<!-- Topbar: clock (left) + spacer + user panel (right) -->
+<!-- Topbar -->
 <div class="topbar" aria-hidden="false">
   <div id="clock" class="clock">--:--:-- -- | -- --- ----</div>
-
-  <div style="flex:1"></div> <!-- spacer pushes user panel to the far right -->
-
+  <div style="flex:1"></div>
   <div class="user-panel" id="topUserPanel" aria-hidden="false">
     <div class="user-badge" id="userStatusDisplay">Not logged</div>
     <div class="user-actions" id="topUserActions">
@@ -544,54 +414,45 @@ input[type="date"]::-webkit-calendar-picker-indicator {
   </div>
 </div>
 
-<!-- Twinkling stars & particle network -->
 <canvas id="stars-bg"></canvas>
 <canvas id="particles-bg"></canvas>
-
-<!-- RGB Nebula layer -->
 <div class="rgb-nebula" aria-hidden="true"></div>
 
 <header>Alter Table Squad</header>
 
-<!-- AUTH OVERLAY (gate) -->
+<!-- AUTH OVERLAY -->
 <div id="authOverlay" role="dialog" aria-modal="true">
-  <div class="authBox">
+  <div class="authBox" style="width:920px; max-width:98%; display:grid; grid-template-columns:1fr 1fr; gap:16px; background:rgba(20,20,20,0.95); border-radius:12px; padding:18px;">
     <div class="authLeft authRow">
-      <h3>User Login / Register</h3>
+      <h3 style="margin:0 0 8px 0; color:var(--neon-blue)">User Login / Register</h3>
       <label for="gateUserName">Name</label>
       <input id="gateUserName" type="text" placeholder="e.g. Ravi Kumar" autocomplete="off">
-
       <label for="gateUserPwd">Password</label>
       <input id="gateUserPwd" type="password" placeholder="Choose / enter password">
-
       <div style="display:flex; gap:10px; margin-top:8px;">
         <button id="gateRegisterBtn">Register</button>
         <button id="gateUserLoginBtn">Login</button>
       </div>
-
-      <div class="authHint">Register will create your user account and add you to employees so your row appears.</div>
+      <div class="authHint" style="font-size:13px; color:#9aa8bf; margin-top:8px;">Register will create your user account and add you to employees so your row appears.</div>
     </div>
 
     <div class="authRight authRow">
-      <h3>Admin Login</h3>
+      <h3 style="margin:0 0 8px 0; color:var(--neon-blue)">Admin Login</h3>
       <label for="gateAdminPwd">Admin password</label>
       <input id="gateAdminPwd" type="password" placeholder="Admin password">
-
       <div style="display:flex; gap:10px; margin-top:8px;">
         <button id="gateAdminLoginBtn">Admin Login</button>
         <button id="gateSkipBtn" title="Restore session if stored">Restore session / Cancel</button>
       </div>
-
-      <div class="authHint">If you've logged in previously, press Restore session; otherwise login/register.</div>
+      <div class="authHint" style="font-size:13px; color:#9aa8bf; margin-top:8px;">If you've logged in previously, press Restore session; otherwise login/register.</div>
     </div>
   </div>
 </div>
 
 <div id="mainPage" class="locked">
-
   <div class="container">
 
-    <!-- Admin: Employee Management -->
+    <!-- Admin controls -->
     <div class="card" id="adminCard" style="display:none">
       <div class="section-title">Employee Management</div>
       <div id="employeeList">
@@ -601,34 +462,30 @@ input[type="date"]::-webkit-calendar-picker-indicator {
       </div>
     </div>
 
-    <!-- TABLE CARD -- visible to users and admin -->
+    <!-- TABLE -->
     <div class="card table-card">
       <div class="section-title">Attendance Table</div>
 
-      <div class="search-card">
-        <span class="mini-title">Search Employee Presence:</span>
+      <div class="search-card" style="display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-bottom:12px;">
+        <span class="mini-title" style="color:#dbeffd; font-weight:700; margin-right:6px;">Search Employee Presence:</span>
         <input type="text" id="employeeSearch" list="employeeSuggestions" placeholder="Type employee name..." />
         <datalist id="employeeSuggestions"></datalist>
         <button id="searchBtn">Add</button>
         <button id="clearSearchBtn">Clear</button>
-
-        <!-- selected employees pills -->
         <div class="selected-list" id="selectedList" aria-live="polite"></div>
-
-        <!-- badges will be rendered here (under search) -->
-        <div id="searchSummary"></div>
+        <div id="searchSummary" style="margin-left:8px; display:flex; align-items:center; gap:8px; flex-wrap:wrap;"></div>
       </div>
 
       <label for="monthPicker">Select Month for Table: </label>
       <input type="month" id="monthPicker" onchange="generateTable()">
-      <div class="table-wrapper">
+      <div class="table-wrapper" style="margin-top:12px;">
         <div class="table-container">
           <table id="attendanceTable"></table>
         </div>
       </div>
     </div>
 
-    <!-- Admin: Bulk Update (admin-only) -->
+    <!-- Bulk -->
     <div class="card" id="bulkCard" style="display:none">
       <div class="section-title">Bulk Update Attendance</div>
       <label>Status: </label>
@@ -645,7 +502,7 @@ input[type="date"]::-webkit-calendar-picker-indicator {
       <button id="bulkApplyBtn">Apply</button>
     </div>
 
-    <!-- Admin: Save / Upload Data -->
+    <!-- Save / Upload -->
     <div class="card" id="saveUploadCard" style="display:none">
       <div class="section-title">Save / Upload Data</div>
       <button id="saveExcelBtn">SAVE FILE</button>
@@ -653,12 +510,11 @@ input[type="date"]::-webkit-calendar-picker-indicator {
       <input type="file" id="fileInput" accept=".xlsx" style="display:none">
     </div>
 
-    <!-- Visualizations (now single combined chart; visible to all users) -->
+    <!-- Visualizations -->
     <div class="card" id="vizCard" style="display:none">
       <div class="section-title">Visualizations</div>
-
       <div class="view-toggle" role="group" aria-label="Daily or Monthly view toggle">
-        <div class="pill" id="vizPill">
+        <div class="pill" id="vizPill" style="display:inline-flex; gap:8px; align-items:center; margin-bottom:12px;">
           <button id="vizDailyBtn" type="button">Daily</button>
           <button id="vizMonthlyBtn" class="active" type="button">Monthly</button>
         </div>
@@ -672,7 +528,7 @@ input[type="date"]::-webkit-calendar-picker-indicator {
       <div class="charts" style="margin-top:15px;">
         <div class="chart-container">
           <div class="chart-title" id="combinedChartTitle">Monthly Summary</div>
-          <div id="chartScroller">
+          <div id="chartScroller" style="width:100%; overflow-x:auto;">
             <canvas id="combinedChart"></canvas>
           </div>
         </div>
@@ -687,15 +543,11 @@ input[type="date"]::-webkit-calendar-picker-indicator {
 const SESSION_USER_KEY = 'attendance_current_user';
 const SESSION_ADMIN_KEY = 'attendance_is_admin';
 
-let employees = [], attendanceData = {}, barChart=null; // single chart now
-/* color map */
+let employees = [], attendanceData = {}, barChart=null;
 const colors = {"WFO":"#2ecc71","WFH":"#3498db","Leave":"#e74c3c","Holiday":"#f1c40f"};
-
-/* selection state: multiple employees */
 let selectedEmployees = [];
-
-let firebaseSynced = false; // <- guard: we received initial server snapshot
-const TOP_N = 10; // show first N employees by default; rest horizontally scrollable
+let firebaseSynced = false;
+const TOP_N = 10; // number of rows visible in viewport (adjustable)
 
 function encodeKey(key){ return encodeURIComponent(key); }
 function decodeKey(enc){ try{ return decodeURIComponent(enc); } catch(e){ return enc; } }
@@ -739,6 +591,7 @@ const vizCardEl = document.getElementById('vizCard');
 
 const selectedListEl = document.getElementById('selectedList');
 const searchSummaryEl = document.getElementById('searchSummary');
+const tableContainer = document.querySelector('.table-container');
 
 if(typeof window.currentUser === 'undefined') window.currentUser = null;
 if(typeof window.isAdmin === 'undefined') window.isAdmin = false;
@@ -757,24 +610,24 @@ function updateSessionUI(){
     adminLoginMainBtn.style.display = 'none';
     adminLogoutMainBtn.style.display = '';
     if(adminCardEl) adminCardEl.style.display = 'block';
-    if(saveUploadCardEl) saveUploadCardEl.style.display = '';           // show save/upload
+    if(saveUploadCardEl) saveUploadCardEl.style.display = '';
     if(bulkCardEl) bulkCardEl.style.display = 'block';
   } else {
     adminLoginMainBtn.style.display = '';
     adminLogoutMainBtn.style.display = 'none';
     if(adminCardEl) adminCardEl.style.display = 'none';
-    if(saveUploadCardEl) saveUploadCardEl.style.display = 'none';       // hide save/upload
+    if(saveUploadCardEl) saveUploadCardEl.style.display = 'none';
     if(bulkCardEl) bulkCardEl.style.display = 'none';
   }
 
-  // Visualization is visible to everyone (users and admin)
+  // Visualization visible to all
   if(vizCardEl) vizCardEl.style.display = 'block';
 }
 
 /* little alert */
 function toast(msg){ alert(msg); }
 
-/* ===== IST Clock (robust) ===== */
+/* ===== IST Clock ===== */
 (function istClock(){
   const el = document.getElementById('clock');
   function tick(){
@@ -815,7 +668,6 @@ function toast(msg){ alert(msg); }
           }
           employees = val.employees || [];
         }
-        // mark that we've received the initial server snapshot
         firebaseSynced = true;
         refreshEmployeeDatalist();
         if(overlay.style.display === 'none') generateTable();
@@ -869,7 +721,7 @@ async function saveToFirebase(){
   }
 }
 
-/* Save only employees (used while registering/removing to avoid touching attendanceData) - MERGE SAFE */
+/* Save only employees (merge-safe) */
 async function saveEmployeesOnly(){
   if(!dbReady()){ console.warn('firebase not ready'); return; }
   const { db, ref, child, get, update } = window.firebaseDB;
@@ -885,7 +737,7 @@ async function saveEmployeesOnly(){
   }
 }
 
-/* ===== Single update with guard ===== */
+/* Single-field update with guard */
 function updateData(key, val){
   const namePart = key.split('_')[0];
   const current = window.currentUser || null;
@@ -957,7 +809,6 @@ async function registerUserOverlay(){
     // add employee only to employees list (avoid touching attendanceData)
     if(!employees.includes(name)){
       employees.push(name);
-      // NEW: use merge-safe employees write
       await saveEmployeesOnly();
     }
 
@@ -1030,17 +881,15 @@ document.getElementById('addEmployeeBtn')?.addEventListener('click', async ()=>{
   if(name && !employees.includes(name)){ 
     employees.push(name); 
     document.getElementById("employeeName").value=""; 
-    // only save employees list (avoid touching attendanceData) - use merge-safe writer
     await saveEmployeesOnly();
     refreshEmployeeDatalist();
     generateTable(); 
   } 
 });
 
-/* ===== New: delete employee function (removes employee AND attendance keys) ===== */
+/* ===== Delete employee (safe removal + attendance cleanup) ===== */
 async function deleteEmployeeByName(name) {
   if(!name) return;
-  // update local state first
   employees = employees.filter(e => e !== name);
   // remove any attendanceData keys for this employee in local object
   for(const k of Object.keys(attendanceData)){
@@ -1049,26 +898,19 @@ async function deleteEmployeeByName(name) {
     }
   }
 
-  // If firebase ready, remove employee from server and remove attendance keys (set to null)
   if(dbReady()){
     try {
       const { db, ref, child, get, update } = window.firebaseDB;
       const rootRef = ref(db, 'attendanceApp');
 
-      // load server employees and compute new list
+      // fetch server employees list
       const snap = await get(child(rootRef, 'employees'));
       const serverEmployees = Array.isArray(snap.val()) ? snap.val() : [];
       const newEmployees = serverEmployees.filter(e => e !== name);
 
       // prepare attendance updates: set each matching encoded key to null (delete)
       const attendanceUpdates = {};
-      // caution: server attendance keys are encoded; we must encode local key names too
-      // remove all attendanceApp/attendanceData/<encodedLocalKey>
-      for(const localKey in attendanceData){
-        // already deleted local ones; so nothing remains for this employee in attendanceData.
-      }
-      // but there may be server keys present for this employee that weren't in local attendanceData
-      // To be safe, query server attendanceData and set matching keys to null:
+
       const snapAtt = await get(child(rootRef, 'attendanceData'));
       const serverAttendance = snapAtt.exists() ? snapAtt.val() : {};
       for(const enc in serverAttendance){
@@ -1089,7 +931,7 @@ async function deleteEmployeeByName(name) {
       toast('Failed removing employee from server — see console.');
     }
   } else {
-    // not connected to firebase: attempt saving employees only later when ready
+    // offline fallback
     try { await saveEmployeesOnly(); await saveToFirebase(); } catch(e){ console.warn(e); }
     toast(`Removed employee "${name}" locally (offline).`);
   }
@@ -1098,14 +940,13 @@ async function deleteEmployeeByName(name) {
   generateTable();
 }
 
-/* replace previous remove handler to use deleteEmployeeByName */
+/* replace previous remove handler */
 document.getElementById('removeEmployeeBtn')?.addEventListener('click', async ()=>{ 
   if(!window.isAdmin){ alert("Admin access required to remove employees."); return; }
   const name=document.getElementById("employeeName").value.trim();
   if(!name){ toast('Enter employee name to remove'); return; }
-  // confirm removal
   if(!confirm(`Remove employee "${name}"? This will also remove their attendance entries.`)) return;
-  document.getElementById("employeeName").value=""; 
+  document.getElementById("employeeName").value="";
   await deleteEmployeeByName(name);
 });
 
@@ -1131,12 +972,11 @@ userLogoutBtn.addEventListener('click', ()=> {
   toast('User logged out.');
 });
 
-/* ===== Datalist & Search (user-limited visibility) ===== */
+/* ===== Datalist & Search ===== */
 function refreshEmployeeDatalist(){
   const dl = document.getElementById("employeeSuggestions");
   if(!dl) return;
   dl.innerHTML = "";
-  // Admin sees all employees in datalist; regular users only see their own name
   const listToShow = window.isAdmin ? employees.slice().sort((a,b)=>a.localeCompare(b)) : (window.currentUser ? [window.currentUser] : []);
   listToShow.forEach(emp=>{
     const opt = document.createElement("option");
@@ -1145,7 +985,6 @@ function refreshEmployeeDatalist(){
   });
 }
 
-/* Add employee to current selection (multiple select behavior) */
 function addEmployeeFromSearch(){
   const input = document.getElementById("employeeSearch");
   const nameRaw = (input.value || '').trim();
@@ -1173,7 +1012,6 @@ function addEmployeeFromSearch(){
   }
 }
 
-/* render the selected employees pills */
 function renderSelectedList(){
   selectedListEl.innerHTML = '';
   selectedEmployees.forEach(emp => {
@@ -1192,13 +1030,13 @@ function renderSelectedList(){
   });
 }
 
-/* If selection empty -> show top N employees (depending on admin/user); else show only selected rows */
 function applySelectionToTable(){
   const table = document.getElementById("attendanceTable");
   if(!table) return;
   const rows = Array.from(table.querySelectorAll("tr"));
   if(selectedEmployees.length === 0){
-    generateTable();
+    // show all rows (table has full list), but viewport still shows TOP_N
+    rows.forEach((tr, idx) => tr.style.display = '');
     return;
   }
   rows.forEach((tr, idx)=>{
@@ -1212,7 +1050,6 @@ function applySelectionToTable(){
   });
 }
 
-/* Clear selection and restore search input and table */
 function clearEmployeeFilter(){
   document.getElementById('employeeSearch').value = '';
   selectedEmployees = [];
@@ -1229,7 +1066,6 @@ function highlightDatesForEmployeesStatus(employeeNames, status){
   const table = document.getElementById('attendanceTable');
   if(!table) return;
   let firstHighlightedCell = null;
-  const ths = Array.from(document.querySelectorAll('#attendanceTable th'));
 
   for(const emp of employeeNames){
     const rows = Array.from(table.querySelectorAll('tr'));
@@ -1286,7 +1122,7 @@ function clearDateHighlights(){
   });
 }
 
-/* ===== Table generation (user-limited visibility + auto-scroll) ===== */
+/* ===== Table generation (renders full list; tableContainer viewport set to TOP_N rows) ===== */
 let lastStatusFilter = null;
 function scrollToTableColumn(table, colIndex){
   try{
@@ -1323,23 +1159,7 @@ function generateTable(){
   else if(window.currentUser) employeesToShow = employees.includes(window.currentUser) ? [window.currentUser] : [window.currentUser];
   else employeesToShow = [];
 
-  // If user/admin didn't select any specific employees, limit table to TOP_N rows to prevent huge tables
-  if(selectedEmployees.length === 0){
-    employeesToShow = employeesToShow.slice(0, TOP_N);
-  } else {
-    // When selection exists, ensure selected employees are shown even if outside TOP_N
-    const selectedSet = new Set(selectedEmployees);
-    const keep = [];
-    // put selected employees first (in selection order), then fill rest from employeesToShow up to TOP_N but include selected beyond TOP_N
-    const added = new Set();
-    selectedEmployees.forEach(s => {
-      if(employees.includes(s) && !added.has(s)) { keep.push(s); added.add(s); }
-    });
-    employeesToShow.forEach(e => { if(!added.has(e) && keep.length < Math.max(TOP_N, selectedEmployees.length)) { keep.push(e); added.add(e); } });
-    // if none of selected existed in main employees list, just use keep fallback
-    employeesToShow = keep.length ? keep : employeesToShow.slice(0, TOP_N);
-  }
-
+  // Render full list for vertical scrolling UX (viewport controlled separately)
   employeesToShow.forEach(emp=>{
     let row=`<tr${(window.currentUser && window.currentUser === emp) ? ' class="highlight-row"' : '' }><td>${emp}</td>`;
     for(let d=1; d<=daysInMonth; d++){
@@ -1355,7 +1175,7 @@ function generateTable(){
         const canEdit = (window.isAdmin === true) || (window.currentUser && window.currentUser === emp);
         if(canEdit){
           row+=`<td style="background:${colors[val]||'transparent'}">
-            <select onchange="updateData('${emp}_${year}-${monthNum}-${d}', this.value)">
+            <select onchange="updateData('${emp}_${year}-${monthNum}-${String(d).padStart(2,'0')}', this.value)">
               <option value="">Select</option>
               <option value="WFO" ${val==="WFO"?"selected":""}>WFO</option>
               <option value="WFH" ${val==="WFH"?"selected":""}>WFH</option>
@@ -1371,6 +1191,21 @@ function generateTable(){
     row+="</tr>"; table.innerHTML+=row;
   });
 
+  // Set vertical viewport height so that TOP_N rows are visible (including header)
+  try {
+    const headerEl = table.querySelector('tr th');
+    const firstDataRow = table.querySelector('tr:nth-child(2)');
+    const headerHeight = headerEl ? headerEl.offsetHeight : 48;
+    const rowHeight = firstDataRow ? firstDataRow.offsetHeight : 48;
+    const visible = Math.max(1, Math.min(TOP_N, employeesToShow.length));
+    const desired = headerHeight + (rowHeight * visible);
+    if(tableContainer){
+      tableContainer.style.maxHeight = desired + 'px';
+      tableContainer.style.overflowY = 'auto';
+    }
+  } catch(e){ console.warn('Could not set vertical scroll height for tableContainer', e); }
+
+  // Auto-scroll to today's column (existing behavior)
   try {
     const monthVal = document.getElementById("monthPicker").value;
     if(monthVal){
@@ -1407,7 +1242,7 @@ function generateTable(){
   if(lastStatusFilter) filterRowsByStatus(lastStatusFilter);
 }
 
-/* ===== Bulk update / Excel / load (with admin guards) ===== */
+/* ===== Bulk update / Excel / load (admin only) ===== */
 function applyBulkUpdate(){
   if(!window.isAdmin){ alert("Bulk update requires admin access."); return; }
   const status = document.getElementById("bulkStatus").value;
@@ -1488,7 +1323,7 @@ function loadFromExcel(event){
   reader.readAsArrayBuffer(file);
 }
 
-/* ===== Chart plugin ===== */
+/* ===== Chart plugin & chart functions ===== */
 const DepthBars = {
   id: 'depthBars',
   afterDatasetsDraw(chart){
@@ -1628,7 +1463,7 @@ Chart.register(DepthBars);
   resize(); requestAnimationFrame(step);
 })();
 
-/* ===== Visualization toggle wiring (default Monthly/current month) ===== */
+/* ===== Visualization toggle wiring (default Monthly) ===== */
 (function(){
   const dailyBtn = document.getElementById('vizDailyBtn');
   const monthlyBtn = document.getElementById('vizMonthlyBtn');
@@ -1655,12 +1490,11 @@ Chart.register(DepthBars);
   if(dailyBtn && monthlyBtn){
     dailyBtn.addEventListener('click', setDaily);
     monthlyBtn.addEventListener('click', setMonthly);
-    // DEFAULT: Monthly (current month)
     setMonthly();
   }
 })();
 
-/* ===== Chart helpers + combined updateCharts() ===== */
+/* ===== Chart helpers + updateCharts() ===== */
 function createGradient(ctx, color){
   const gradient = ctx.createLinearGradient(0,0,0,350);
   gradient.addColorStop(0, lightenColor(color,0.3));
@@ -1681,7 +1515,6 @@ function updateCharts(){
   const monthlyPicker = document.getElementById('monthlyPicker');
   const dayPicker = document.getElementById('dayPicker');
 
-  // Default to current month for monthly view
   if(monthlyToggleVisible){
     if(!monthlyPicker.value){
       const monthInput = document.getElementById('monthPicker');
@@ -1704,7 +1537,6 @@ function updateCharts(){
     const [year, monthNum] = monthlyPicker.value.split("-");
     const monthSummary = {};
 
-    // Alphabetical order
     const empsSorted = employees.slice().sort((a,b)=>a.localeCompare(b));
     const days = new Date(year, monthNum, 0).getDate();
     empsSorted.forEach(emp=>{
@@ -1724,7 +1556,6 @@ function updateCharts(){
     const statuses = ["WFO","WFH","Leave","Holiday"];
     const labels = empsSorted;
 
-    // Dynamic canvas width for scroll: 80px per employee (show at least TOP_N)
     const canvas = document.getElementById("combinedChart");
     const pxPerEmp = 80;
     const baseWidth = Math.max(TOP_N * pxPerEmp, Math.max(1, labels.length) * pxPerEmp);
@@ -1778,7 +1609,6 @@ function updateCharts(){
     if(barChart) barChart.destroy();
     barChart = new Chart(ctx, { type: "bar", data: { labels, datasets }, options });
 
-    // Scroll so first TOP_N are visible by default
     const scroller = document.getElementById('chartScroller');
     scroller.scrollLeft = 0;
 
@@ -1924,7 +1754,7 @@ function updateSearchSummaryForSelection(){
   });
 }
 
-/* Filter rows by status (kept for potential use) */
+/* Filter rows by status */
 function filterRowsByStatus(status){
   const monthVal = document.getElementById("monthPicker").value;
   if(!monthVal) return;
@@ -1987,4 +1817,3 @@ window.removeEmployee = ()=> document.getElementById('removeEmployeeBtn').click(
 </script>
 </body>
 </html>
-
