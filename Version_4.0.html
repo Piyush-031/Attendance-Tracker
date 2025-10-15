@@ -886,6 +886,50 @@ async function saveEmployeesOnly(){
   }
 }
 
+/* === NEW: Exact remove that does NOT union with server === */
+async function removeEmployeeExact(name){
+  if(!window.isAdmin){ alert("Admin access required to remove employees."); return; }
+  if(!name){ toast('Enter an employee name to remove.'); return; }
+  if(!dbReady()){ toast('Firebase not ready.'); return; }
+  try {
+    const { db, ref, child, get, update, set } = window.firebaseDB;
+
+    // Local update
+    employees = employees.filter(e => e !== name);
+
+    // Write exact list (no union)
+    await update(ref(db, 'attendanceApp'), { employees });
+
+    // Remove user auth record (so they can't reuse old credentials)
+    const userKey = encodeUserKey(name);
+    await set(child(ref(db), `attendanceApp/users/${userKey}`), null);
+
+    // OPTIONAL: also remove attendance rows for that employee
+    // const attRef = child(ref(db), 'attendanceApp/attendanceData');
+    // const snap = await get(attRef);
+    // if (snap.exists()) {
+    //   const server = snap.val();
+    //   const updates = {};
+    //   for (const encKey in server) {
+    //     const k = decodeKey(encKey);
+    //     if (k.startsWith(name + '_')) updates[encKey] = null;
+    //   }
+    //   if (Object.keys(updates).length) await update(attRef, updates);
+    // }
+
+    // Clean any current selection containing removed user
+    selectedEmployees = selectedEmployees.filter(e => e !== name);
+    refreshEmployeeDatalist();
+    renderSelectedList();
+    applySelectionToTable();
+    generateTable();
+    toast(`Removed "${name}".`);
+  } catch (e) {
+    console.error('removeEmployeeExact error:', e);
+    toast('Failed to remove employee (see console).');
+  }
+}
+
 /* ===== Single update with guard ===== */
 function updateData(key, val){
   const namePart = key.split('_')[0];
@@ -930,6 +974,7 @@ function adminLoginFromOverlay(){
       hideOverlay();
       generateTable();
       toast('Admin login success.');
+      scheduleAutoLogout(); // reset inactivity timer on login
     } else {
       toast('Invalid admin password.');
     }
@@ -968,6 +1013,7 @@ async function registerUserOverlay(){
     hideOverlay();
     generateTable();
     toast('Registered and logged in.');
+    scheduleAutoLogout(); // start inactivity timer
   } catch(e){
     console.error('register overlay err', e);
     toast('Registration failed (see console).');
@@ -995,6 +1041,7 @@ async function loginUserOverlay(){
     hideOverlay();
     generateTable();
     toast('Login successful.');
+    scheduleAutoLogout(); // start inactivity timer
   } catch(e){
     console.error('login overlay err', e);
     toast('Login failed (see console).');
@@ -1011,6 +1058,7 @@ function restoreSessionFromStorage(){
   if(window.currentUser || window.isAdmin){
     hideOverlay();
     generateTable();
+    scheduleAutoLogout(); // resume inactivity timer if a session exists
     return true;
   }
   return false;
@@ -1037,15 +1085,14 @@ document.getElementById('addEmployeeBtn')?.addEventListener('click', async ()=>{
     generateTable(); 
   } 
 });
+
+/* === UPDATED: remove uses exact delete (no union) === */
 document.getElementById('removeEmployeeBtn')?.addEventListener('click', async ()=>{ 
-  if(!window.isAdmin){ alert("Admin access required to remove employees."); return; }
   const name=document.getElementById("employeeName").value.trim();
-  employees = employees.filter(e=>e!==name); 
   document.getElementById("employeeName").value=""; 
-  await saveEmployeesOnly();
-  refreshEmployeeDatalist();
-  generateTable(); 
+  await removeEmployeeExact(name);
 });
+
 searchBtn.addEventListener('click', addEmployeeFromSearch);
 document.getElementById('clearSearchBtn').addEventListener('click', clearEmployeeFilter);
 document.getElementById('saveExcelBtn').addEventListener('click', saveToExcel);
@@ -1165,7 +1212,6 @@ function highlightDatesForEmployeesStatus(employeeNames, status){
   const table = document.getElementById('attendanceTable');
   if(!table) return;
   let firstHighlightedCell = null;
-  const ths = Array.from(document.querySelectorAll('#attendanceTable th'));
 
   for(const emp of employeeNames){
     const rows = Array.from(table.querySelectorAll('tr'));
@@ -1864,6 +1910,36 @@ function filterRowsByStatus(status){
   lastStatusFilter = status;
 }
 
+/* ===== NEW: Auto-logout after inactivity (60s) ===== */
+let inactivityTimer = null;
+const INACTIVITY_MS = 60 * 1000; // 60 seconds
+
+function scheduleAutoLogout(){
+  if (inactivityTimer) clearTimeout(inactivityTimer);
+  inactivityTimer = setTimeout(() => {
+    try {
+      // Clear both user & admin sessions
+      localStorage.removeItem(SESSION_USER_KEY);
+      localStorage.removeItem(SESSION_ADMIN_KEY);
+      window.currentUser = null;
+      window.isAdmin = false;
+      updateSessionUI();
+      showOverlay();
+      toast('Signed out due to inactivity (60s).');
+    } catch (e) {
+      console.warn('Auto-logout error', e);
+      showOverlay();
+    }
+  }, INACTIVITY_MS);
+}
+
+function hookActivityListeners(){
+  const reset = () => scheduleAutoLogout();
+  ['click','mousemove','keydown','scroll','touchstart','touchmove','wheel'].forEach(evt => {
+    window.addEventListener(evt, reset, { passive: true });
+  });
+}
+
 /* Initialize defaults and restore session */
 window.addEventListener("DOMContentLoaded", ()=>{
   const monthInput = document.getElementById("monthPicker");
@@ -1888,6 +1964,10 @@ window.addEventListener("DOMContentLoaded", ()=>{
 
   refreshEmployeeDatalist();
   generateTable();
+
+  /* NEW: start inactivity tracking */
+  hookActivityListeners();
+  scheduleAutoLogout();
 });
 
 /* Expose some functions for inline handlers */
@@ -1897,11 +1977,13 @@ window.saveToExcel = saveToExcel;
 window.loadFromExcel = (e) => { fileInput.files = e.target.files; loadFromExcel({ target: fileInput }); };
 window.applyBulkUpdate = applyBulkUpdate;
 window.addEmployee = ()=> document.getElementById('addEmployeeBtn').click();
-window.removeEmployee = ()=> document.getElementById('removeEmployeeBtn').click();
+/* remove uses the exact remover now */
+window.removeEmployee = async ()=> {
+  const name=document.getElementById("employeeName").value.trim();
+  document.getElementById("employeeName").value="";
+  await removeEmployeeExact(name);
+};
 
 </script>
 </body>
 </html>
-
-
-
