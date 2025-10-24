@@ -522,6 +522,54 @@ input[type="date"]::-webkit-calendar-picker-indicator {
   overflow-x: auto;
   overflow-y: hidden;
 }
+
+/* ===== Stylish Neon Toggle Switch (NEW) ===== */
+.toggle-label {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+  cursor: pointer;
+  user-select: none;
+  color: #dbeffd;
+  font-weight: 700;
+  font-size: 0.95rem;
+}
+.toggle-switch { opacity: 0; width: 0; height: 0; }
+.toggle-slider {
+  position: relative;
+  width: 54px;
+  height: 28px;
+  background: rgba(255,255,255,0.08);
+  border-radius: 50px;
+  transition: all 0.3s ease;
+  box-shadow: inset 0 0 8px rgba(255,255,255,0.1);
+}
+.toggle-slider::before {
+  content: "";
+  position: absolute;
+  height: 22px;
+  width: 22px;
+  left: 4px;
+  top: 3px;
+  background-color: #ccc;
+  border-radius: 50%;
+  transition: all 0.3s ease;
+  box-shadow: 0 0 6px rgba(255,255,255,0.3);
+}
+/* When checked */
+.toggle-switch:checked + .toggle-slider {
+  background: linear-gradient(90deg, #0984e3, #6c5ce7);
+  box-shadow: 0 0 16px rgba(9,132,227,0.4), inset 0 0 8px rgba(255,255,255,0.15);
+}
+.toggle-switch:checked + .toggle-slider::before {
+  transform: translateX(26px);
+  background-color: #fff;
+  box-shadow: 0 0 12px rgba(0,184,148,0.5);
+}
+.toggle-label:hover .toggle-slider {
+  box-shadow: 0 0 12px rgba(9,132,227,0.25);
+}
 </style>
 </head>
 <body>
@@ -622,6 +670,16 @@ input[type="date"]::-webkit-calendar-picker-indicator {
 
       <label for="monthPicker">Select Month for Table: </label>
       <input type="month" id="monthPicker" onchange="generateTable()">
+
+      <!-- Admin-only toggle for past date editing (NEW) -->
+      <div id="editPastToggleContainer" style="margin-top: 14px; display:none;">
+        <label class="toggle-label">
+          <span class="toggle-text">Allow Editing Past Dates</span>
+          <input type="checkbox" id="allowEditPastToggle" class="toggle-switch">
+          <span class="toggle-slider"></span>
+        </label>
+      </div>
+
       <div class="table-wrapper">
         <div class="table-container">
           <table id="attendanceTable"></table>
@@ -698,6 +756,9 @@ let selectedEmployees = [];
 let firebaseSynced = false; // <- guard: we received initial server snapshot
 const TOP_N = 10; // show first N employees by default; rest horizontally scrollable
 
+/* NEW: admin toggle state */
+let allowEditPast = false;
+
 function encodeKey(key){ return encodeURIComponent(key); }
 function decodeKey(enc){ try{ return decodeURIComponent(enc); } catch(e){ return enc; } }
 function dbReady(){ return !!window.firebaseDB && !!window.firebaseDB.db; }
@@ -741,6 +802,10 @@ const vizCardEl = document.getElementById('vizCard');
 const selectedListEl = document.getElementById('selectedList');
 const searchSummaryEl = document.getElementById('searchSummary');
 
+/* NEW: toggle refs */
+const editPastToggleContainer = document.getElementById('editPastToggleContainer');
+const allowEditPastToggle = document.getElementById('allowEditPastToggle');
+
 if(typeof window.currentUser === 'undefined') window.currentUser = null;
 if(typeof window.isAdmin === 'undefined') window.isAdmin = false;
 
@@ -770,6 +835,16 @@ function updateSessionUI(){
 
   // Visualization is visible to everyone (users and admin)
   if(vizCardEl) vizCardEl.style.display = 'block';
+
+  // NEW: show/hide the admin-only toggle for past editing
+  if (editPastToggleContainer) {
+    editPastToggleContainer.style.display = window.isAdmin ? 'block' : 'none';
+    // Reset toggle if not admin
+    if (!window.isAdmin) {
+      allowEditPast = false;
+      if (allowEditPastToggle) allowEditPastToggle.checked = false;
+    }
+  }
 }
 
 /* little alert */
@@ -1313,7 +1388,21 @@ function generateTable(){
       if(date.getDay()===0||date.getDay()===6){
         row+=`<td class="weekend">Week Off</td>`;
       } else if(date < today){
-        row+=`<td style="background:${colors[val]||'transparent'}">${val||""}</td>`;
+        // NEW: allow admin to edit past dates if toggle is ON
+        const canEditPast = window.isAdmin && allowEditPast;
+        if (canEditPast){
+          row+=`<td style="background:${colors[val]||'transparent'}">
+            <select onchange="updateData('${key}', this.value)">
+              <option value="">Select</option>
+              <option value="WFO" ${val==="WFO"?"selected":""}>WFO</option>
+              <option value="WFH" ${val==="WFH"?"selected":""}>WFH</option>
+              <option value="Leave" ${val==="Leave"?"selected":""}>Leave</option>
+              <option value="Holiday" ${val==="Holiday"?"selected":""}>Holiday</option>
+            </select>
+          </td>`;
+        } else {
+          row+=`<td style="background:${colors[val]||'transparent'}">${val||""}</td>`;
+        }
       } else {
         const canEdit = (window.isAdmin === true) || (window.currentUser && window.currentUser === emp);
         if(canEdit){
@@ -1960,6 +2049,14 @@ window.addEventListener("DOMContentLoaded", ()=>{
     hideOverlay();
   } else {
     showOverlay();
+  }
+
+  // NEW: wire toggle change (already defined above too-safe)
+  if (allowEditPastToggle) {
+    allowEditPastToggle.addEventListener('change', (e) => {
+      allowEditPast = e.target.checked;
+      generateTable();
+    });
   }
 
   refreshEmployeeDatalist();
